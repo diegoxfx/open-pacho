@@ -36,12 +36,12 @@ class OpenCLArray(OpenPachoArray):
 
         # If host_data is given, allocate on GPU and copy data over
         if host_data is not None and host_data.size > 0:
-            self._cl_buffer = cl_array.to_device(self._queue, host_data, dtype=dtype)
+            self._cl_buffer = cl_array.to_device(self._queue, host_data)
         else:
             # Allocate an empty buffer if shape is known but no data provided
             size = np.prod(self.shape) if self.shape else 1
             empty_data = np.zeros(size, dtype=dtype)
-            self._cl_buffer = cl_array.to_device(self._queue, empty_data, dtype=dtype)
+            self._cl_buffer = cl_array.to_device(self._queue, empty_data)
 
     def to_host(self):
         """
@@ -59,7 +59,7 @@ class OpenCLArray(OpenPachoArray):
             raise ValueError(f"Incompatible shapes: {data.shape} != {self.shape}")
 
         # Copy data to GPU buffer
-        self._cl_buffer.set(self._queue, data)
+        self._cl_buffer.set(data, queue=self._queue)
 
     def __len__(self):
         """
