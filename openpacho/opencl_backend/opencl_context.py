@@ -1,20 +1,22 @@
 import pyopencl as cl
+from openpacho.config import get_device_type
+from openpacho.config import get_device_index
 
 class OpenCLContextManager:
     _instance = None
 
-    def __new__(cls, device_type="GPU"):
+    def __new__(cls):
         """
         Implements the singleton pattern so that we only have
         one instance of the context manager throughout the app.
         """
         if cls._instance is None:
             cls._instance = super(OpenCLContextManager, cls).__new__(cls)
-            cls._instance._init_context(device_type)
+            cls._instance._init_context()
         return cls._instance
 
-    def _init_context(self, device_type):
-        # Get platforms
+    def _init_context(self):
+        device_type = get_device_type()  # "CPU" or "GPU"
         platforms = cl.get_platforms()
         if not platforms:
             raise RuntimeError("No OpenCL platforms found.")
@@ -29,7 +31,13 @@ class OpenCLContextManager:
                 devices = platform.get_devices(device_type=cl.device_type.CPU)
 
             if devices:
-                selected_device = devices[0]
+                device_index = get_device_index()
+                if device_index is None:
+                    print("Multiple OpenCL devices detected:")
+                    for i, dev in enumerate(devices):
+                        print(f"[{i}] {dev.name} (platform: {dev.platform.name})")
+                    device_index = int(input("Select device index: "))
+                selected_device = devices[device_index]
                 break
 
         if selected_device is None:
