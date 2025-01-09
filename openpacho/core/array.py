@@ -22,3 +22,19 @@ class OpenPachoArray:
         Optionally load data from host. Must be overridden by child classes.
         """
         raise NotImplementedError("Must be overridden in subclass.")
+
+    def __add__(self, other):
+        """Elementwise addition."""
+        raise NotImplementedError("Must be overridden in subclass.")
+
+    def __sub__(self, other):
+        """Elementwise subtraction."""
+        raise NotImplementedError("Must be overridden in subclass.")
+
+    def __mul__(self, other):
+        """Elementwise multiplication."""
+        raise NotImplementedError("Must be overridden in subclass.")
+
+    def __truediv__(self, other):
+        """Elementwise division."""
+        raise NotImplementedError("Must be overridden in subclass.")
