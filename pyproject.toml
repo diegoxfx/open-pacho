@@ -1,0 +1,27 @@
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "open-pacho"
+version = "0.1.0"
+description = "A NumPy-like library for GPU acceleration using OpenCL"
+readme = "README.md"
+keywords = ["opencl", "gpu", "numpy-like", "python"]
+license = {file = "LICENSE"}
+authors = [{ name = "Diego Cifuentes", email = "dcifuen3@gmail.com"}]
+requires-python = ">=3.10"
+
+dependencies = [
+  "numpy>=2.2.1",
+  "pyopencl>=2024.3",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.4",
+  "pyopencl[pocl]"
+]
+
+# Example “scripts” entry (CLI commands) if desired
+[project.scripts]
+openpacho-cli = "openpacho.__main__:main"
