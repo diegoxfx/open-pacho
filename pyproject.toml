@@ -21,7 +21,3 @@ dev = [
   "pytest>=8.3.4",
   "pyopencl[pocl]"
 ]
-
-# Example “scripts” entry (CLI commands) if desired
-[project.scripts]
-openpacho-cli = "openpacho.__main__:main"
