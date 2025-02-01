@@ -1,194 +1,251 @@
 import numpy as np
-import pyopencl as cl
 import pyopencl.array as cl_array
 
 from openpacho.core.array import OpenPachoArray
-from openpacho.opencl_backend.opencl_context import OpenCLContextManager
+from openpacho.core.backend_registry import get_backend
+
 
 class OpenCLArray(OpenPachoArray):
     """
-    An array that resides in the GPU memory and uses OpenCL for computation.
+    An array that resides in GPU memory and uses OpenCL for computation.
+    It applies transparent padding to ensure each dimension meets the rules above.
     """
 
-    def __init__(self, host_data=None, dtype=None):
+    def __init__(self, host_data=None, dtype=None, original_shape=None, padded_shape=None):
         """
-        host_data can be a list or a NumPy array.
+        host_data can be a Python list, NumPy array, OpenCLArray, or pyopencl.array.Array.
         """
-        # Convert incoming data to a NumPy array if it isn't one already
-        if host_data is not None and not isinstance(host_data, np.ndarray | cl_array.Array | OpenCLArray):
-            host_data = np.array(host_data, dtype=dtype if dtype else np.float32)
+        # If initializing from an existing OpenCLArray, copy attributes accordingly
+        if isinstance(host_data, OpenCLArray):
+            self._cl_buffer = host_data.cl_buffer
+            self._original_shape = host_data.original_shape
+            self._padded_shape = host_data.padded_shape
+            self.shape = host_data._padded_shape
+            self.dtype = host_data.dtype
+            self.backend = host_data.backend
+            return  # Initialization complete
         
-        # Infer shape and dtype if not explicitly provided
+        # Convert to NumPy if not already
+        if host_data is not None and not isinstance(host_data, (np.ndarray, cl_array.Array)):
+            host_data = np.array(host_data, dtype=dtype if dtype else np.float32)
+
+        # Infer shape/dtype
         if host_data is not None:
-            # If host_data is an OpenCLArray, we copy its shape/dtype
-            if isinstance(host_data, OpenCLArray):
-                shape = host_data.shape
+            if isinstance(host_data, cl_array.Array):
+                shape = original_shape if original_shape is not None else host_data.shape
                 dtype = host_data.dtype
-            # If host_data is a pyopencl Array
-            elif isinstance(host_data, cl_array.Array):
-                shape = host_data.shape
-                dtype = host_data.dtype
+
+                self._cl_buffer = host_data
             else:
                 shape = host_data.shape
                 dtype = host_data.dtype
+
+                self._original_shape = shape
         else:
             shape = ()
-            dtype = dtype if dtype else np.float32  # default fallback
+            dtype = dtype if dtype else np.float32
 
-        super().__init__(shape=shape, dtype=dtype)
+        # Raise error if shape dim is greater than 2. Only 1D and 2D arrays are supported yet
+        if host_data is not None and len(host_data.shape) > 2:
+            raise NotImplementedError("Only 1D and 2D arrays are supported.")
+        backend = get_backend("opencl")
+        super().__init__(shape=shape, dtype=dtype, backend=backend)
 
-        # Acquire OpenCL context and queue
-        self._cl_manager = OpenCLContextManager()
-        self._context = self._cl_manager.get_context()
-        self._queue = self._cl_manager.get_queue()
+        # Raise error if original shape not provided and if _padded_shape not a multiple of preferred_multiple
+        if isinstance(host_data, cl_array.Array):
+            if original_shape is None:
+                preferred_multiple = self.backend.context_manager.get_preferred_work_group_size_multiple()
+                if padded_shape is None:
+                    padded_shape = shape
+                if any(dim % preferred_multiple != 0 for dim in padded_shape):
+                    raise ValueError(
+                        "Padded shape must be a multiple of the preferred work group size multiple."
+                    )
+                # TODO: Implement padding logic for cl_array if not already padded
+            else:
+                self._original_shape = original_shape
+                self._padded_shape = padded_shape
+        elif isinstance(host_data, np.ndarray):
+            self._padded_shape = self._calculate_padded_shape(shape)
+            padded_data = self._pad_host_data(host_data, self._original_shape, self._padded_shape)
+            self._cl_buffer = cl_array.to_device(self.backend.context_manager.queue, padded_data)
 
-        # Metadata for padding
-        self._actual_size = int(np.prod(self.shape))  # real number of elements
-        self._padded_size = self._round_up_to_multiple_of_8(self._actual_size)
-
-        # Handle different types of host_data
-        if isinstance(host_data, OpenCLArray):
-            # If the user passed an existing OpenCLArray,
-            # we just reference its cl_array, plus copy metadata.
-            self._cl_buffer = host_data._cl_buffer
-            self._actual_size = host_data._actual_size
-            self._padded_size = host_data._padded_size
-
-        elif isinstance(host_data, cl_array.Array):
-            # If user passed a pyopencl array, we assume it is already sized appropriately
-            # or we might want to copy it into a newly padded buffer.
-            # For demonstration, let's simply reference it if it's sized for our shape:
-            if host_data.size < self._padded_size:
-                # We need to re-allocate a bigger buffer
-                host_data = self._pad_and_wrap_cl_array(host_data)
-            self._cl_buffer = host_data
-
-        elif host_data is not None and host_data.size > 0:
-            # Convert host_data to a padded 1D array (flattened)
-            padded_host_data = self._pad_host_data(host_data)
-            # Send to GPU
-            self._cl_buffer = cl_array.to_device(self._queue, padded_host_data)
-        else:
-            # No data or shape given; allocate a zeroed buffer (with padding)
-            empty_data = np.zeros(self._padded_size, dtype=dtype)
-            self._cl_buffer = cl_array.to_device(self._queue, empty_data)
-
-    def _round_up_to_multiple_of_8(self, n):
-        return ((n + 7) // 8) * 8
-
-    def _pad_host_data(self, data: np.ndarray) -> np.ndarray:
+    def _pad_dimension(self, dim):
         """
-        Flattens the incoming data and pads it to self._padded_size if needed.
+        Pad a single dimension to the nearest multiple of preferred work group size multiple.
         """
-        flattened = data.ravel()  # flatten in row-major order
-        if flattened.size == self._padded_size:
-            return flattened
-        # Otherwise, create a new array with enough space
-        new_data = np.zeros(self._padded_size, dtype=self.dtype)
-        new_data[:flattened.size] = flattened
-        return new_data
+        # Query CL_DEVICE_PREFERRED_WORK_GROUP_SIZE_MULTIPLE
+        if dim == 1:
+            return 1
+        preferred_multiple = self.backend.context_manager.get_preferred_work_group_size_multiple()
+        return ((dim + preferred_multiple - 1) // preferred_multiple) * preferred_multiple
+
+    def _calculate_padded_shape(self, shape):
+        """
+        Calculate the padded shape.
+        """
+        return tuple(map(self._pad_dimension, shape))
     
-    def _pad_and_wrap_cl_array(self, cl_arr: cl_array.Array):
+    def _pad_host_data(self, host_data, original_shape, padded_shape):
         """
-        If the existing cl_array is too small (or not padded),
-        allocate a new buffer with self._padded_size, copy old data.
+        Pad the host data with zeros based on the original and padded shapes.
+        Supports 1D and 2D arrays.
         """
-        new_buf = cl_array.zeros(self._queue, (self._padded_size,), dtype=self.dtype)
-        # Copy the existing data over
-        cl.enqueue_copy(self._queue, dest=new_buf.data, src=cl_arr.data, byte_count=cl_arr.nbytes)
-        return new_buf
+        slices = tuple(slice(0, n) for n in original_shape)
+        if host_data is None:
+            # If no data provided, return a zero-filled array with padded shape
+            return np.zeros(padded_shape, dtype=self.dtype)
+        
+        padded_data = np.zeros(padded_shape, dtype=self.dtype)
+        padded_data[slices] = host_data[slices]
+        return padded_data
 
     def to_host(self) -> np.ndarray:
         """
-        Returns a NumPy array copy of the GPU data, reshaping to the original shape
-        and ignoring padded elements.
+        Returns a NumPy array of shape 'self._original_shape', discarding padded elements.
         """
-        padded_result = self._cl_buffer.get()  # length = self._padded_size
-        # Slice to the actual size, then reshape
-        real_data = padded_result[:self._actual_size]
-        return real_data.reshape(self.shape)
+        slices = tuple(slice(0, n) for n in self._original_shape)
+        padded_result = self._cl_buffer.get().reshape(self._padded_shape)
+        real_data = padded_result[slices]
+        return real_data.copy()
 
     def from_host(self, data):
         """
-        Replaces the GPU data with new host data. Must match shape/dtype (un-padded).
+        Updates the GPU buffer from a new host array matching 'self._actual_shape'.
         """
         if not isinstance(data, np.ndarray):
             data = np.array(data, dtype=self.dtype)
 
-        if data.shape != self.shape:
-            raise ValueError(f"Incompatible shapes: {data.shape} != {self.shape}")
+        shape = data.shape
+        self._original_shape = shape
 
-        # Flatten and pad
-        padded_host_data = self._pad_host_data(data)
-        # Copy to GPU buffer
-        if padded_host_data.size != self._cl_buffer.size:
-            # Need to re-create the buffer
-            self._cl_buffer = cl_array.to_device(self._queue, padded_host_data)
+        self._padded_shape = self._calculate_padded_shape(shape)
+        padded_data = self._pad_host_data(data, self._original_shape, self._padded_shape)
+        self._cl_buffer = cl_array.to_device(self.backend.context_manager.queue, padded_data)
+
+    def _is_scalar(self, value):
+        """
+        Check if the value is a scalar (int, float, or NumPy scalar).
+        """
+        return np.isscalar(value)
+
+    def _prepare_operand(self, other):
+        """
+        Prepare the operand for arithmetic operations.
+        
+        - If 'other' is a scalar, return it directly.
+        - If 'other' is an OpenCLArray, ensure shapes match and return its buffer.
+        - Otherwise, convert 'other' to an OpenCLArray and ensure shapes match, then return its buffer.
+        """
+        if self._is_scalar(other):
+            return other
         else:
-            self._cl_buffer.set(padded_host_data, queue=self._queue)
+            other_cl = self._ensure_opencl_array(other)
+            if self._padded_shape != other_cl._padded_shape:
+                raise ValueError("Shapes of both OpenCLArrays must match for this operation.")
+            return other_cl._cl_buffer
 
     def __add__(self, other):
-        """Elementwise addition, ignoring padding logic in the user-level API."""
-        other_cl = self._ensure_opencl_array(other)
-        # Perform direct elementwise on full buffers
-        result_buf = self._cl_buffer + other_cl._cl_buffer
-        # Create a new OpenCLArray from the result,
-        # reusing self's shape/dtype => ensures same padding logic
-        res_array = OpenCLArray()
-        res_array.shape = self.shape
-        res_array.dtype = self.dtype
-        res_array._actual_size = self._actual_size
-        res_array._padded_size = self._padded_size
-        res_array._cl_buffer = result_buf
-        return res_array
+        operand = self._prepare_operand(other)
+        result_buf = self._cl_buffer + operand
+        return OpenCLArray(
+            host_data=result_buf,
+            original_shape=self._original_shape,
+            padded_shape=self._padded_shape,
+        )
 
     def __sub__(self, other):
-        other_cl = self._ensure_opencl_array(other)
-        result_buf = self._cl_buffer - other_cl._cl_buffer
-        res_array = OpenCLArray()
-        res_array.shape = self.shape
-        res_array.dtype = self.dtype
-        res_array._actual_size = self._actual_size
-        res_array._padded_size = self._padded_size
-        res_array._cl_buffer = result_buf
-        return res_array
+        operand = self._prepare_operand(other)
+        result_buf = self._cl_buffer - operand
+        return OpenCLArray(
+            host_data=result_buf,
+            original_shape=self._original_shape,
+            padded_shape=self._padded_shape,
+        )
 
     def __mul__(self, other):
-        other_cl = self._ensure_opencl_array(other)
-        result_buf = self._cl_buffer * other_cl._cl_buffer
-        res_array = OpenCLArray()
-        res_array.shape = self.shape
-        res_array.dtype = self.dtype
-        res_array._actual_size = self._actual_size
-        res_array._padded_size = self._padded_size
-        res_array._cl_buffer = result_buf
-        return res_array
+        operand = self._prepare_operand(other)
+        result_buf = self._cl_buffer * operand
+        return OpenCLArray(
+            host_data=result_buf,
+            original_shape=self._original_shape,
+            padded_shape=self._padded_shape,
+        )
 
     def __truediv__(self, other):
-        other_cl = self._ensure_opencl_array(other)
-        result_buf = self._cl_buffer / (other_cl._cl_buffer + 1e-12)
-        res_array = OpenCLArray()
-        res_array.shape = self.shape
-        res_array.dtype = self.dtype
-        res_array._actual_size = self._actual_size
-        res_array._padded_size = self._padded_size
-        res_array._cl_buffer = result_buf
-        return res_array
+        operand = self._prepare_operand(other)
+        result_buf = self._cl_buffer / (operand + 1e-12)
+        return OpenCLArray(
+            host_data=result_buf,
+            original_shape=self._original_shape,
+            padded_shape=self._padded_shape,
+        )
 
     def _ensure_opencl_array(self, other):
         """
-        Utility to handle the right-hand operand for elementwise ops.
-        If 'other' is not an OpenCLArray, convert it.
+        Convert 'other' to an OpenCLArray if needed, using the same dtype as self.
         """
         if isinstance(other, OpenCLArray):
             return other
         else:
-            return OpenCLArray(other)
+            return OpenCLArray(other, dtype=self.dtype)
 
     def __len__(self):
-        """
-        Return the 'outer dimension' length for convenience.
-        """
-        if len(self.shape) == 0:
-            return 0
+        """If it's 1D or 2D, return the outer dimension (like NumPy does for 2D)."""
         return self.shape[0]
+    
+    def reshape(self, new_shape):
+        """
+        Reshape the current OpenCLArray to 'new_shape'.
+
+        If total elements match and either the old or new shape
+        is effectively 1D (including (N,1) or (1,N)), we do a "metadata-only" reshape.
+        Otherwise, we do a device->device copy with a new buffer.
+        """
+        # Normalize to tuple
+        if isinstance(new_shape, int):
+            new_shape = (new_shape,)
+        if len(new_shape) > 2:
+            raise NotImplementedError("Only 1D or 2D reshapes are supported.")
+
+        # 1) Check total elements
+        old_size = np.prod(self._original_shape)
+        new_size = np.prod(new_shape)
+        if new_size != old_size:
+            raise ValueError(
+                f"Cannot reshape array of size {old_size} into shape {new_shape} "
+                f"(size {new_size})."
+            )
+
+        # 2) If shapes are identical, nothing to do
+        if new_shape == self._original_shape:
+            return self
+
+        # 3) Check if we can do a "metadata-only" reshape
+        #    Condition: If old or new shape is effectively 1D
+        #    i.e. shape is (N,) or (N,1) or (1,N).
+        def is_effectively_1d(shape):
+            """Returns True if shape is (N,), (N,1), or (1,N)."""
+            # shape could be 1D or 2D
+            if len(shape) == 1:
+                return True
+            elif len(shape) == 2:
+                (r, c) = shape
+                return (r == 1 or c == 1)
+            return False
+
+        can_metadata_reshape = (
+            is_effectively_1d(self._original_shape) or
+            is_effectively_1d(new_shape)
+        )
+
+        if can_metadata_reshape:
+            # Also check that we fit within the allocated padded capacity
+            if new_size <= np.prod(self._padded_shape):
+                # => METADATA-ONLY
+                self._original_shape = new_shape
+                return self
+            # If it doesn't fit in the padded shape (very rare in 1D?), we do a copy below.
+
+        # 4) Otherwise, do device->device copy to re-layout physically
+        return self._reshape_device_copy(new_shape)
