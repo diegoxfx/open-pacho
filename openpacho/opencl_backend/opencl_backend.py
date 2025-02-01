@@ -21,9 +21,15 @@ class OpenCLBackend(OpenPachoBackend):
         out_arr = kernel.vector_dot_kernel(self.context_manager, x._cl_buffer, y._cl_buffer, shape=padded_shape)
         return out_arr.get()[0]
     
-    def matrix_vec(self, x: OpenCLArray, y: OpenCLArray):
+    def matrix_vec(self, x: OpenCLArray, y: OpenCLArray, return_vec=False):
         padded_shape = x._padded_shape
         shape = x._original_shape
+        if return_vec:
+            out_shape = (shape[0], )
+            out_padded_shape = (padded_shape[0], )
+        else:
+            out_shape = (shape[0], 1)
+            out_padded_shape = (padded_shape[0], 1)
         out_arr = kernel.matrix_vector_kernel(self.context_manager, x._cl_buffer, y._cl_buffer, shape=padded_shape)
-        out_arr = OpenCLArray(out_arr, original_shape=(shape[0], 1), padded_shape=(padded_shape[0], 1))
+        out_arr = OpenCLArray(out_arr, original_shape=out_shape, padded_shape=out_padded_shape)
         return out_arr
