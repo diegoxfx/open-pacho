@@ -3,6 +3,7 @@ import pyopencl.array as cl_array
 
 from openpacho.core.array import OpenPachoArray
 from openpacho.core.backend_registry import get_backend
+import openpacho as op
 
 
 class OpenCLArray(OpenPachoArray):
@@ -74,9 +75,6 @@ class OpenCLArray(OpenPachoArray):
         """
         Pad a single dimension to the nearest multiple of preferred work group size multiple.
         """
-        # Query CL_DEVICE_PREFERRED_WORK_GROUP_SIZE_MULTIPLE
-        if dim == 1:
-            return 1
         preferred_multiple = self.backend.context_manager.get_preferred_work_group_size_multiple()
         return ((dim + preferred_multiple - 1) // preferred_multiple) * preferred_multiple
 
@@ -162,6 +160,15 @@ class OpenCLArray(OpenPachoArray):
             original_shape=self._original_shape,
             padded_shape=self._padded_shape,
         )
+    
+    def __rsub__(self, other):
+        operand = self._prepare_operand(other)
+        result_buf = operand - self._cl_buffer
+        return OpenCLArray(
+            host_data=result_buf,
+            original_shape=self._original_shape,
+            padded_shape=self._padded_shape,
+        )
 
     def __mul__(self, other):
         operand = self._prepare_operand(other)
@@ -171,6 +178,9 @@ class OpenCLArray(OpenPachoArray):
             original_shape=self._original_shape,
             padded_shape=self._padded_shape,
         )
+    
+    def __rmul__(self, other):
+        return self.__mul__(other)
 
     def __truediv__(self, other):
         operand = self._prepare_operand(other)
@@ -180,6 +190,10 @@ class OpenCLArray(OpenPachoArray):
             original_shape=self._original_shape,
             padded_shape=self._padded_shape,
         )
+    
+    def __matmul__(self, other):
+        operand = self._ensure_opencl_array(other)
+        return op.linalg.dot(self, operand)
 
     def _ensure_opencl_array(self, other):
         """
@@ -189,10 +203,19 @@ class OpenCLArray(OpenPachoArray):
             return other
         else:
             return OpenCLArray(other, dtype=self.dtype)
+        
+    def _extract_scalar(self, result):
+        result = result.to_host()
+        if result.size == 1:
+            return result.item()
+        return result
 
     def __len__(self):
         """If it's 1D or 2D, return the outer dimension (like NumPy does for 2D)."""
         return self.shape[0]
+    
+    def transpose(self):
+        return op.transpose(self)
     
     def reshape(self, new_shape):
         """
