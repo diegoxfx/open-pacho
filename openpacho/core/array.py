@@ -1,12 +1,16 @@
+from abc import ABC, abstractmethod
+from openpacho.core.backend import OpenPachoBackend
+
 class OpenPachoArray:
     """
     Base class for all OpenPacho array types.
     This class can define a common interface for array-like objects.
     """
 
-    def __init__(self, shape, dtype=None):
+    def __init__(self, shape, backend: OpenPachoBackend, dtype=None):
         self.shape = shape
         self.dtype = dtype
+        self.backend = backend
         # Possibly store metadata (e.g. strides, data pointer references)
         # but leave it minimal for now.
 
