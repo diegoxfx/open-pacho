@@ -55,3 +55,14 @@ class OpenCLContextManager:
 
     def get_device(self):
         return self.device
+
+    def get_preferred_work_group_size_multiple(self):
+        """
+        Query the device for CL_DEVICE_PREFERRED_WORK_GROUP_SIZE_MULTIPLE.
+        """
+        try:
+            preferred_multiple = self.device.preferred_work_group_size_multiple
+            return preferred_multiple
+        except Exception as e:
+            print(f"Warning: Could not get preferred work group size multiple. Defaulting to 8. Error: {e}")
+            return 8  # Fallback to 8 if query fails
