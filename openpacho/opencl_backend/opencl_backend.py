@@ -33,3 +33,13 @@ class OpenCLBackend(OpenPachoBackend):
         out_arr = kernel.matrix_vector_kernel(self.context_manager, x._cl_buffer, y._cl_buffer, shape=padded_shape)
         out_arr = OpenCLArray(out_arr, original_shape=out_shape, padded_shape=out_padded_shape)
         return out_arr
+
+    def matrix_matrix(self, x: OpenCLArray, y: OpenCLArray):
+        out_arr = kernel.matrix_matrix_kernel(self.context_manager, x._cl_buffer, y._cl_buffer, a_shape=x._padded_shape, b_shape=y._padded_shape)
+        out_arr = OpenCLArray(out_arr, original_shape=(x.shape[0], y.shape[1]), padded_shape=(x._padded_shape[0], y._padded_shape[1]))
+        return out_arr
+    
+    def transpose(self, x: OpenCLArray):
+        out_arr = kernel.matrix_transpose_kernel(self.context_manager, x._cl_buffer, shape=x._padded_shape)
+        out_arr = OpenCLArray(out_arr, original_shape=(x.shape[1], x.shape[0]), padded_shape=(x._padded_shape[1], x._padded_shape[0]))
+        return out_arr
