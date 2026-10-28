@@ -1,29 +1,29 @@
-# Backend Vulkan
+# Vulkan backend
 
-Backend compute nativo e independiente de OpenCL, implementado en 0.1.0a1.
-Su objetivo inicial es ejecutar correctamente el mismo subconjunto de arrays;
-todavía no tiene paridad de rendimiento con OpenCL o las referencias CUDA.
+A native compute backend independent of OpenCL, implemented in 0.1.0a1.
+Its initial goal is to execute the same array subset correctly;
+it does not yet have performance parity with OpenCL or the CUDA references.
 
-## Instalación y selección
+## Installation and selection
 
-Desde este repositorio:
+From this repository:
 
 ```sh
 python -m pip install ".[vulkan]"
 pacho devices --backend vulkan
 ```
 
-Se necesita un driver Vulkan del fabricante y un compilador GLSL a SPIR-V:
-`glslangValidator`, `glslang` o `glslc`. Se busca primero el ejecutable indicado
-en `PACHO_VULKAN_COMPILER`, después PATH y después `VULKAN_SDK/Bin`. Por ejemplo:
+A vendor Vulkan driver and a GLSL-to-SPIR-V compiler are required:
+`glslangValidator`, `glslang` or `glslc`. Search first checks the executable specified
+in `PACHO_VULKAN_COMPILER`, then PATH and then `VULKAN_SDK/Bin`. For example:
 
 ```powershell
 $env:PACHO_VULKAN_COMPILER = "C:\VulkanSDK\<version>\Bin\glslangValidator.exe"
 ```
 
-El paquete Python no descarga compiladores ni instala drivers automáticamente.
-El [SDK Vulkan](https://vulkan.lunarg.com/) y
-[glslang de Khronos](https://github.com/KhronosGroup/glslang) se distribuyen por separado.
+The Python package does not automatically download compilers or install drivers.
+The [Vulkan SDK](https://vulkan.lunarg.com/) and
+[Khronos glslang](https://github.com/KhronosGroup/glslang) are distributed separately.
 
 ```python
 import openpacho as pacho
@@ -31,69 +31,68 @@ import openpacho as pacho
 print(pacho.devices("vulkan"))
 with pacho.use_backend("vulkan", device="0"):
     a = pacho.asarray([[1, 2], [3, 4]], dtype=pacho.float32)
-    resultado = a @ a + 2
-    print(pacho.asnumpy(resultado))
+    result = a @ a + 2
+    print(pacho.asnumpy(result))
 ```
 
-Los IDs Vulkan son índices propios, no los IDs `plataforma:dispositivo` de OpenCL.
-Un backend ausente o una operación no soportada produce un error explícito.
-No se cambia a CPU, CUDA u OpenCL para resolverla.
+Vulkan IDs are its own indices, not OpenCL `platform:device` IDs.
+An unavailable backend or unsupported operation produces an explicit error.
+It does not switch to CPU, CUDA or OpenCL to resolve it.
 
-## Implementación y capacidades
+## Implementation and capabilities
 
-Los arrays permanecen en buffers device-local. Las transferencias usan staging,
-con barreras de visibilidad y sincronización. La cola conserva referencias a los
-recursos en vuelo; descarga/synchronize y el límite de 64 operaciones pendientes
-esperan su finalización. Una fence reutilizable marca el trabajo anterior de la
-cola propia al observar resultados; solo después de esperar y resetearla se
-reciclan los recursos. No añade una fence por dispatch ni elimina barreras.
-Con la cola vacía, `synchronize()` retorna sin llamada nativa de espera.
-Un fallo de finalización se propaga y bloquea nuevos envíos en esa instancia;
-no se reciclan recursos cuya finalización sea incierta. Ver el
-[control frente a espera de cola](routing-completion-results.md).
-Los pipelines SPIR-V se cachean por fuente/configuración.
-Los escalares aritméticos se pasan mediante push constants, sin subir un buffer
-escalar por operación. Los bool se almacenan como uint32 en GPU y se convierten
-a bool NumPy al transferirlos.
+Arrays remain in device-local buffers. Transfers use staging,
+with visibility barriers and synchronization. The queue retains references to
+in-flight resources; download/synchronize and the limit of 64 pending operations
+wait for completion. A reusable fence marks prior work on the
+owned queue when observing results; resources are recycled only after waiting and
+resetting it. It does not add a fence per dispatch or remove barriers.
+With an empty queue, `synchronize()` returns without a native wait call.
+A completion failure propagates and blocks new submissions on that instance;
+resources with uncertain completion are not recycled. See the
+[control against queue waiting](routing-completion-results.md).
+SPIR-V pipelines are cached by source/configuration.
+Arithmetic scalars are passed through push constants without uploading a scalar
+buffer per operation. Bools are stored as uint32 on the GPU and converted
+to NumPy bool during transfer.
 
-El staging host coherente de lectura conserva sus mapeos mientras existe la asignación,
-también al reutilizarla desde el pool. Solo se desmapea al expulsarla o liberarla.
-Esto elimina llamadas repetidas de map/unmap, sin eliminar copias, barreras ni
-esperas. Las subidas mantienen map/unmap por copia; la variante general dio tiempos
-mixtos. Los límites compartidos de memoria del pool siguen vigentes. La selección
-de capacidad y la liberación de caché toleran que un finalizador Python devuelva
-un buffer mientras se recorre el pool: el RLock por sí solo no evita esa reentrada.
+Coherent host read staging retains its mappings for the lifetime of the allocation,
+including reuse from the pool. It is unmapped only on eviction or release.
+This removes repeated map/unmap calls without removing copies, barriers or
+waits. Uploads retain map/unmap per copy; the general variant gave mixed
+times. The pool's shared memory limits remain in force. Capability selection
+and cache release tolerate a Python finalizer returning a buffer while the pool
+is being traversed: the RLock alone does not prevent that reentrancy.
 
-| Área | Estado |
+| Area | Status |
 | --- | --- |
-| float32, int32, uint32, bool | Operaciones soportadas de la API común |
-| float64 | Requiere shaderFloat64; sin exp/log/sin/cos/tanh/potencia float64 |
-| int64, uint64 | Requiere shaderInt64 |
-| Broadcasting y elementwise | Kernels propios y escalares por valor |
-| Aleatorios | [Philox residente](random.md): random/uniform float32/64; normal/exponential float32. Semilla/contador en dos palabras uint32, sin exigir shaderInt64 |
-| sum/mean y normas | Reducciones propias; normas escaladas y parciales compactos para reducciones grandes |
-| Productos vector/matriz | GEMV/DOT cooperativos; GEMM float32 elegible con bloques de registros 32×32 y alternativa 8×8; broadcasting por lotes; sin proveedor BLAS Vulkan |
-| Reshape, slicing, transposición, diagonales | Contrato común; slicing/transposición copian |
-| compile | Plan reutilizable, preparación de bindings, fusión elementwise/map-reduce y del patrón privado de residuo GEMV compatible |
-| Memoria | Pool de buffers por tamaño/tipo de memoria; límites de storage buffer e índices comprobados |
+| float32, int32, uint32, bool | Supported operations of the common API |
+| float64 | Requires shaderFloat64; no float64 exp/log/sin/cos/tanh/power |
+| int64, uint64 | Requires shaderInt64 |
+| Broadcasting and elementwise | Custom kernels and scalars by value |
+| Random | [Resident Philox](random.md): float32/64 random/uniform; float32 normal/exponential. Seed/counter in two uint32 words, without requiring shaderInt64 |
+| sum/mean and norms | Custom reductions; scaled norms and compact partials for large reductions |
+| Vector/matrix products | Cooperative GEMV/DOT; eligible float32 GEMM with 32×32 register blocks and an 8×8 alternative; batch broadcasting; no Vulkan BLAS provider |
+| Reshape, slicing, transpose, diagonals | Common contract; slicing/transpose copy |
+| compile | Reusable plan, binding preparation, elementwise/map-reduce fusion and fusion of the compatible private GEMV residual pattern |
+| Memory | Buffer pool by size/memory type; storage-buffer and index limits checked |
 
-`compile(..., padding=True)` o `matmul(..., padding=True)` permiten
-[padding interno de GEMM float32](padding.md), con relleno y recorte en GPU.
-Las copias mantienen los bits originales y las formas visibles no cambian.
-Está desactivado por defecto; mide el pipeline completo antes de elegirlo.
+`compile(..., padding=True)` or `matmul(..., padding=True)` allow
+[internal float32 GEMM padding](padding.md), with padding and cropping on the GPU.
+Copies retain original bits and visible shapes do not change.
+It is disabled by default; measure the complete pipeline before selecting it.
 
-La API pública conserva sus restricciones aunque una primitiva interna admita
-más casos. No se promete compatibilidad NumPy completa ni igualdad de dtypes
-disponibles entre dispositivos. Un shader rechazado no se traduce en un resultado
-CPU escondido.
+The public API retains its restrictions even if an internal primitive supports
+more cases. Full NumPy compatibility or identical available dtypes across devices
+is not promised. A rejected shader does not turn into a hidden CPU result.
 
-## Verificación
+## Verification
 
-Pruebas específicas incluidas selección pública, buffers residentes,
-dependencias entre 80 operaciones, tipos, slicing, reducción, matmul, compilación
-cacheada y los tres solvers de `examples/solvers.py` en float32/64, como
-aplicaciones externas al paquete. Ejecutadas en RTX 5060 Ti con driver
-616.64, Windows 11 y glslang 16.5.0. **AMD e Intel todavía no se han probado.**
+Specific tests include public selection, resident buffers,
+dependencies across 80 operations, types, slicing, reduction, matmul, cached
+compilation and the three solvers in `examples/solvers.py` in float32/64 as
+applications external to the package. Run on RTX 5060 Ti with driver
+616.64, Windows 11 and glslang 16.5.0. **AMD and Intel have not yet been tested.**
 
 ```powershell
 $env:PACHO_REQUIRE_VULKAN = "1"
@@ -101,66 +100,66 @@ python -m pytest tests/test_vulkan.py -q
 pacho benchmark --backend vulkan --size 128 --repeat 7
 ```
 
-El pool conserva como máximo 128 buffers libres y 128 MiB de memoria Vulkan
-realmente asignada, no solo bytes lógicos. Los recursos en vuelo no vuelven al
-pool hasta terminar. Al recibir un buffer nuevo, expulsa buffers de las clases
-de tamaño menos recientemente usadas si hace falta espacio. Así, tamaños viejos
-no impiden indefinidamente reutilizar los nuevos. Prefiere capacidad exacta y,
-si no existe, la menor compatible hasta `2*max(solicitado,256)`; mantiene tamaño
-lógico para descriptores/copias y capacidad original para reciclar. No confunde
-el tamaño del VkBuffer con los requisitos nativos de asignación. Alternar un
-conjunto mayor que su capacidad todavía puede causar reservas y liberaciones
-repetidas. Se reutilizan hasta 128 command buffers. La ruta de descriptor sets
-reutiliza hasta 128 pools y sets después de terminar su uso. Sus layouts
-pertenecen al backend y sobreviven a la expulsión de pipelines. Cada llamada
-compilada graba sus dispatches en un command buffer y lo envía; sincronización,
-presión de caché o 64 operaciones pendientes pueden dividir el grupo. Las
-barreras de memoria se mantienen entre operaciones. Eager conserva el envío
-inmediato. No hay subasignación de grandes bloques ni command graphs persistentes.
+The pool retains at most 128 free buffers and 128 MiB of actually allocated
+Vulkan memory, not just logical bytes. In-flight resources do not return to the
+pool until completion. On receiving a new buffer, it evicts buffers from the least
+recently used size classes if space is needed. Old sizes therefore do not prevent
+new ones from being reused indefinitely. It prefers exact capacity and,
+if none exists, the smallest compatible capacity up to `2*max(requested,256)`;
+it keeps logical size for descriptors/copies and original capacity for recycling.
+It does not confuse VkBuffer size with native allocation requirements. Alternating
+a set larger than its capacity can still cause repeated allocations and releases.
+Up to 128 command buffers are reused. The descriptor-set path
+reuses up to 128 pools and sets after their use completes. Their layouts
+belong to the backend and survive pipeline eviction. Each compiled call
+records its dispatches in one command buffer and submits it; synchronization,
+cache pressure or 64 pending operations can split the group. Memory barriers
+remain between operations. Eager retains immediate submission.
+There is no suballocation of large blocks or persistent command graphs.
 
-El readback prefiere memoria HOST_VISIBLE + HOST_COHERENT + HOST_CACHED cuando
-los bits de compatibilidad del buffer la permiten. Si no existe, conserva memoria
-coherente compatible; no usa memoria no coherente sin invalidación. El pool
-separa staging de subida y readback para no perder esa preferencia al reciclar.
-La subida copia directamente al mapeo, sin crear un objeto bytes intermedio.
-Son mejoras de la ruta portable, no especializaciones NVIDIA.
+Readback prefers HOST_VISIBLE + HOST_COHERENT + HOST_CACHED memory when
+the buffer's compatibility bits allow it. If none exists, it retains compatible
+coherent memory; it does not use noncoherent memory without invalidation. The pool
+separates upload staging and readback to retain that preference when recycling.
+Upload copies directly to the mapping without creating an intermediate bytes object.
+These improve the portable path, rather than specializing for NVIDIA.
 
-Las plantillas de dispatch conservan fuente, ABI y geometría en una LRU de 128
-entradas. En la ruta de fallback, los descriptor sets conservan sus estructuras
-CFFI y se reenlazan después de completar su uso. Los registros host de push se
-reutilizan tras grabar su snapshot en el command buffer; los buffers GPU siguen
-retenidos hasta terminar. Las estructuras de envío/barreras se reutilizan bajo el lock.
-Esto reduce construcción de objetos, sin eliminar la grabación de comandos.
+Dispatch templates retain source, ABI and geometry in a 128-entry LRU.
+On the fallback path, descriptor sets retain their CFFI structures and are
+rebound after use completes. Host push records are reused after recording their
+snapshot in the command buffer; GPU buffers remain retained until completion.
+Submission/barrier structures are reused under the lock.
+This reduces object construction without eliminating command recording.
 
-La [medición de memoria y kernels](numerics-vulkan-results.md) cuantifica esa etapa;
-el [análisis anterior](gaps-and-optimization.md) conserva la referencia y los
-gaps de Python/CFFI, grabación y transferencias que siguen pendientes.
+The [memory and kernel measurement](numerics-vulkan-results.md) quantifies that stage;
+the [earlier analysis](gaps-and-optimization.md) preserves the reference and
+remaining Python/CFFI, recording and transfer gaps.
 
-## Frontera de comandos tipada
+## Typed command boundary
 
-La ruta actual resuelve comandos frecuentes por VkDevice y usa argumentos CFFI
-tipados. Evita conversiones genéricas del binding, conserva sus comprobaciones
-VkResult y mantiene contextos/colas/recursos separados. Si no puede resolver la
-ruta tipada al inicializar, conserva los wrappers del mismo backend; los errores
-de ejecución se propagan. No requiere un compilador C/C++ ni un extra nuevo.
+The current path resolves frequent commands per VkDevice and uses typed CFFI
+arguments. It avoids generic binding conversions, preserves its VkResult checks
+and keeps contexts/queues/resources separate. If it cannot resolve the typed
+path at initialization, it retains wrappers from the same backend; execution
+errors propagate. It requires no C/C++ compiler or new extra.
 
-La tabla privada también permite instrumentación por instancia y un control
-`wrapped`/`direct` en benchmarks. No es configuración pública que deba conocer
-el usuario. Las barreras y la presión de 64 operaciones no cambian. Ver
-[medición y diagnóstico](vulkan-dispatch-results.md). La preparación y el
-control de planes siguen en Python; no es todavía un grabador nativo de grupos.
+The private table also allows per-instance instrumentation and a
+`wrapped`/`direct` control in benchmarks. This is not public configuration users
+need to know. Barriers and the pressure of 64 operations do not change. See
+[measurement and diagnostics](vulkan-dispatch-results.md). Plan preparation and
+control remain in Python; this is not yet a native group recorder.
 
-La ampliación del 2026-09-13 detecta y habilita `VK_KHR_push_descriptor` y su
-dependencia properties2. Dentro de maxPushDescriptors, una llamada escribe todos
-los descriptores en el command buffer; el driver conserva su snapshot. Se omiten
-la actualización y el binding de un descriptor set por dispatch. Las estructuras
-host se reutilizan bajo el lock; los buffers GPU siguen retenidos hasta completar
-el trabajo. Dispositivos sin esa capacidad y grupos que exceden el límite
-conservan descriptor sets. No se necesitan macros ni ajustes del usuario.
-Los controles privados `sets`/`push` y el límite quedan registrados en la
-[comparación entre backends](backend-sharing-results.md).
+The 2026-09-13 extension detects and enables `VK_KHR_push_descriptor` and its
+properties2 dependency. Within maxPushDescriptors, one call writes all
+descriptors into the command buffer; the driver retains their snapshot. A descriptor
+set update and binding per dispatch are skipped. Host structures
+are reused under the lock; GPU buffers remain retained until work completes.
+Devices without that capability and groups exceeding the limit
+retain descriptor sets. No macros or user adjustments are needed.
+Private `sets`/`push` controls and the limit are recorded in the
+[cross-backend comparison](backend-sharing-results.md).
 
-Power float32 ahora maneja bases negativas con exponentes enteros y los casos
-de ceros con signo, NaN/Inf y exponentes fraccionarios fuera del dominio real.
-Se evita llamar GLSL pow con argumentos para los que su resultado es indefinido.
-Power float64 sigue fuera del contrato de este backend.
+Float32 power now handles negative bases with integer exponents and the cases
+of signed zeros, NaN/Inf and fractional exponents outside the real domain.
+It avoids calling GLSL pow with arguments for which its result is undefined.
+Float64 power remains outside this backend's contract.

@@ -1,183 +1,183 @@
-# Binding, contexto CUDA y productos vectoriales — 2026-09-18
+# Binding, CUDA context, and vector products — 2026-09-18
 
-Esta iteración compara tres cambios contra el wheel final de la ronda anterior.
-La mayor ganancia esperada corresponde al DOT largo custom, que antes acumulaba
-en un solo hilo. El binding es una mejora transversal; la gestión de contexto
-tiene un efecto menor y dependiente del plan. Son comparaciones con la versión
-anterior de OpenPacho, no una afirmación de superar CuPy, cuBLAS o NumPy.
+This iteration compares three changes against the final wheel from the previous round.
+The largest expected gain is in long custom DOT, which previously accumulated
+in a single thread. Binding is a cross-cutting improvement; context management
+has a smaller, plan-dependent effect. These are comparisons with the previous
+OpenPacho version, not a claim of outperforming CuPy, cuBLAS, or NumPy.
 
-## Implementación
+## Implementation
 
-1. **Binding posicional del compilador.** Los nombres y la elegibilidad de la firma
-   se resuelven al construir la función compilada. Si llegan todos los parámetros
-   por posición, se evita reconstruir `inspect.BoundArguments`. Los kwargs,
-   defaults omitidos y parámetros keyword-only conservan la ruta general.
-   Permanecen la validación, la LRU, las claves de forma/dtype/backend/estáticos,
-   el reenlace escalar y los errores. No exige `prepare` ni cambiar el algoritmo.
-   La primera captura de una variante sí enlaza la firma; los hits evitan ese trabajo.
-2. **Contexto CUDA anidado y scope selectivo.** El lock protege la profundidad
-   de activación. Una llamada anidada consulta el contexto actual del hilo antes
-   de omitir push/pop; si otra biblioteca lo cambió, activa/restaura el contexto
-   correspondiente. Se restaura también ante excepciones. El compilador resuelve
-   `execution_scope_min_steps` una vez: CUDA solicita al menos dos pasos; Vulkan
-   conserva su comportamiento. No se añaden esperas ni se cambia el límite de
-   64 operaciones pendientes. La gestión sigue el
-   [contrato del Driver API](https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__CTX.html).
-3. **GEMV/DOT cooperativos CUDA custom.** `_cuda_gemv.py` adapta el algoritmo
-   OpenCL: 128 hilos leen términos de una fila y reducen en memoria compartida.
-   Admite filas de matrices y lotes contiguos, float32/64 e índices irregulares.
-   DOT de más de 4096 términos utiliza parciales de 1024 y una reducción GPU.
-   La ruta se selecciona para vector derecho y K >= 256; las filas menores
-   conservan el kernel anterior. CuBLAS conserva su proveedor explícito.
+1. **Compiler positional binding.** Parameter names and signature eligibility
+   are resolved when constructing the compiled function. If all parameters arrive
+   positionally, rebuilding `inspect.BoundArguments` is avoided. Keyword arguments,
+   omitted defaults, and keyword-only parameters retain the general path.
+   Validation, the LRU, shape/dtype/backend/static keys,
+   scalar rebinding, and errors remain. It requires neither `prepare` nor algorithm changes.
+   The first capture of a variant does bind the signature; hits avoid that work.
+2. **Nested CUDA context and selective scope.** The lock protects activation
+   depth. A nested call queries the thread's current context before
+   omitting push/pop; if another library changed it, the appropriate context
+   is activated/restored. It is also restored on exceptions. The compiler resolves
+   `execution_scope_min_steps` once: CUDA requests at least two steps; Vulkan
+   retains its behavior. No waits are added and the limit of
+   64 pending operations is unchanged. Management follows the
+   [Driver API contract](https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__CTX.html).
+3. **Cooperative CUDA custom GEMV/DOT.** `_cuda_gemv.py` adapts the
+   OpenCL algorithm: 128 threads read terms from a row and reduce in shared memory.
+   It supports matrix rows and contiguous batches, float32/64, and irregular indices.
+   DOT with more than 4096 terms uses partials of 1024 and a GPU reduction.
+   The path is selected for a right-hand vector and K >= 256; smaller rows
+   retain the previous kernel. CuBLAS retains its explicit provider.
 
-El primer ensayo habilitaba cooperación desde K=64 y scope en todos los planes.
-La preparación adicional no compensó en varias operaciones cortas. Se descartó
-esa selección indiscriminada; K=256 y dos pasos son criterios conservadores
-locales, no un crossover universal ni autotuning por dispositivo.
+The first experiment enabled cooperation from K=64 and scope on all plans.
+Additional preparation did not pay off for several short operations. That
+indiscriminate selection was discarded; K=256 and two steps are conservative
+local criteria, neither a universal crossover nor device-specific autotuning.
 
-## Método y trazabilidad
+## Method and traceability
 
-Windows, Python 3.12, RTX 5060 Ti, driver 616.64. Se ejecuta un backend por proceso,
-con 31 muestras por alcance, orden de variantes rotado/invertido y dos semillas.
-Entre procesos se exige reposo observado: al menos diez segundos, tres lecturas
-consecutivas, utilización de GPU/memoria <=5%, temperatura <=52 °C y dentro del
-techo relativo de reposo. Cada variante se calienta fuera del reloj durante al
-menos 0,25 segundos y tres llamadas. No garantiza estado térmico estacionario.
+Windows, Python 3.12, RTX 5060 Ti, driver 616.64. One backend runs per process,
+with 31 samples per scope, rotated/reversed variant order, and two seeds.
+Observed idle state is required between processes: at least ten seconds, three consecutive
+readings, GPU/memory utilization <=5%, temperature <=52 °C, and within the
+relative idle ceiling. Each variant warms up outside the timer for at
+least 0.25 seconds and three calls. This does not guarantee thermal steady state.
 
-`benchmarks.three_actions` mide baseline, binding aislado, contexto aislado,
-GEMV aislado y todos juntos cuando aplica. Cada variante tiene su propio plan,
-para que el scope enlazado durante captura sea correcto. Seleccionar el control
-queda fuera del reloj. El control carga solo los métodos anteriores desde un
-wheel local, preservando las identidades de clases/allocations actuales y
-verificando los otros módulos de runtime mediante hashes.
+`benchmarks.three_actions` measures baseline, isolated binding, isolated context,
+isolated GEMV, and all changes together where applicable. Each variant has its own plan
+so the scope bound during capture is correct. Control selection
+is outside the timer. The control loads only the previous methods from a
+local wheel, preserving current class/allocation identities and
+checking other runtime modules through hashes.
 
-El alcance **residente** incluye llamada Python y sincronización, con entradas
-ya subidas. **Completo** añade subida, preparación y descarga. La primera llamada
-se registra separada. Ridge conserva veinte iteraciones de la misma función de
-dominio, no representa tiempo hasta convergencia. No se modifican los solvers.
+The **resident** scope includes the Python call and synchronization, with inputs
+already uploaded. **Complete** adds upload, preparation, and download. First call
+is recorded separately. Ridge retains twenty iterations of the same domain
+function; it does not represent time to convergence. Solvers are not changed.
 
-Los perfiles con eventos y contadores son diagnósticos instrumentados aparte:
-sus duraciones son inclusivas y no se suman ni se restan del tiempo total para
-deducir un supuesto coste puro de Python o de GPU.
+Profiles with events and counters are separate instrumented diagnostics:
+their durations are inclusive and are neither summed nor subtracted from total time to
+deduce a supposed pure Python or GPU cost.
 
-## Resultados medidos
+## Measured results
 
-Las ocho ejecuciones válidas contienen **660 configuraciones y 492 comparaciones
-contra baseline**, con 31 muestras por alcance. Las cifras siguientes agregan
-sin ponderar las reducciones porcentuales de las medianas por caso y ronda;
-no representan una mezcla universal de aplicaciones.
+The eight valid runs contain **660 configurations and 492 comparisons
+against baseline**, with 31 samples per scope. The following figures aggregate
+percentage reductions of per-case and per-round medians without weighting;
+they do not represent a universal application mix.
 
-| Cambio aislado / backend | Menos tiempo residente | Menos tiempo completo |
+| Isolated change / backend | Less resident time | Less complete time |
 | --- | ---: | ---: |
-| Binding, OpenCL custom | 8,05% | 2,34% |
-| Binding, Vulkan | 4,21% | 2,09% |
-| Binding, CUDA/cuBLAS | 5,85% | 1,21% |
-| Binding, CUDA custom | 7,96% | 2,25% |
-| Todos los cambios, CUDA/cuBLAS | 6,32% | 1,32% |
-| Todos los cambios, CUDA custom | 8,60% | 2,04% |
+| Binding, OpenCL custom | 8.05% | 2.34% |
+| Binding, Vulkan | 4.21% | 2.09% |
+| Binding, CUDA/cuBLAS | 5.85% | 1.21% |
+| Binding, CUDA custom | 7.96% | 2.25% |
+| All changes, CUDA/cuBLAS | 6.32% | 1.32% |
+| All changes, CUDA custom | 8.60% | 2.04% |
 
-Para ver el cambio matricial sin diluirlo entre operaciones que no usan GEMV:
+To see the matrix change without diluting it among operations that do not use GEMV:
 
-| CUDA custom, todos los cambios | Antes residente | Ahora residente | Antes completo | Ahora completo |
+| CUDA custom, all changes | Previous resident | Current resident | Previous complete | Current complete |
 | --- | ---: | ---: | ---: | ---: |
-| DOT 1.048.577, f32 | 15,96–16,69 ms | 0,198–0,201 ms | 12,70–12,75 ms | 1,674–1,686 ms |
-| DOT 1.048.577, f64 | 54,89–55,28 ms | 0,188–0,190 ms | 32,96–33,05 ms | 2,923–2,939 ms |
-| GEMV 129×8193, f32 | 0,205–0,207 ms | 0,077–0,078 ms | 1,049–1,053 ms | 0,923–0,925 ms |
-| GEMV 129×8193, f64 | 0,597–0,598 ms | 0,086–0,101 ms | 1,983–2,046 ms | 1,562–1,601 ms |
+| DOT 1,048,577, f32 | 15.96–16.69 ms | 0.198–0.201 ms | 12.70–12.75 ms | 1.674–1.686 ms |
+| DOT 1,048,577, f64 | 54.89–55.28 ms | 0.188–0.190 ms | 32.96–33.05 ms | 2.923–2.939 ms |
+| GEMV 129×8193, f32 | 0.205–0.207 ms | 0.077–0.078 ms | 1.049–1.053 ms | 0.923–0.925 ms |
+| GEMV 129×8193, f64 | 0.597–0.598 ms | 0.086–0.101 ms | 1.983–2.046 ms | 1.562–1.601 ms |
 
-Los intervalos son las dos medianas observadas, no intervalos de confianza.
-Los alcances se calientan/miden por separado: no se debe restar residente de
-completo para estimar transferencia; relojes y estado del dispositivo pueden
-diferir entre alcances. Las grandes razones de mejora corresponden a reemplazar
-nuestro DOT serial anterior, no a una victoria sobre otra biblioteca.
+Ranges are the two observed medians, not confidence intervals.
+Scopes are warmed/measured separately: resident time must not be subtracted from
+complete time to estimate transfer; clocks and device state may
+differ between scopes. The large improvement ratios correspond to replacing
+our previous serial DOT, not to a win over another library.
 
-El scope aislado ahorra una mediana de **2,41% custom / 2,62% cuBLAS** en los
-casos de varios pasos seleccionados (ridge, loss, covarianza y centrado). En el
-agregado completo es marginal: −0,74% custom / +0,26% cuBLAS residente. En ridge
-cuBLAS f32, el diagnóstico reduce los pares push/pop de **243 a 25** por llamada;
-persisten las consultas del contexto actual y otros costes del ejecutor.
+Isolated scope saves a median **2.41% custom / 2.62% cuBLAS** on
+selected multi-step cases (ridge, loss, covariance, and centering). Across the full
+aggregate it is marginal: −0.74% custom / +0.26% cuBLAS resident. For ridge
+cuBLAS f32, diagnostics reduce push/pop pairs from **243 to 25** per call;
+current-context queries and other executor costs remain.
 
-Las fronteras cortas K=256/257 todavía presentan resultados mixtos: la reducción
-cooperativa y su preparación pueden añadir unos microsegundos. El umbral no
-garantiza una mejora para cada forma. Ridge tampoco mejora uniformemente: en la
-segunda ronda custom f32 el tiempo completo pasó de 5,85 a 7,46 ms, mientras que
-el residente bajó de 4,97 a 4,88 ms; f64 residente pasó de 6,60 a 6,68 ms. Estos
-datos permanecen en el informe aunque contradigan la mejora agregada.
-Se intentó un seguimiento de ridge f32 con solo baseline/selección final y 51
-pares por alcance, pero no llegó a medir: la actividad de memoria superó el gate
-de reposo durante los 300 segundos permitidos. `ridge-followup.json` conserva la
-telemetría y el estado incompleto. La regresión puntual sigue sin explicación
-aislada; no se considera ruido demostrado ni una mejora confirmada de ridge.
+The short K=256/257 boundaries still have mixed results: cooperative reduction
+and its preparation can add a few microseconds. The threshold does not
+guarantee a gain for every shape. Ridge does not improve uniformly either: in the
+second custom f32 round, complete time went from 5.85 to 7.46 ms while
+resident time fell from 4.97 to 4.88 ms; f64 resident went from 6.60 to 6.68 ms. These
+data remain in the report even though they contradict the aggregate gain.
+A ridge f32 follow-up with only baseline/final selection and 51
+pairs per scope was attempted, but reached no measurement: memory activity exceeded the idle
+gate throughout the allowed 300 seconds. `ridge-followup.json` retains the
+telemetry and incomplete state. The specific regression still has no isolated
+explanation; it is considered neither demonstrated noise nor a confirmed ridge gain.
 
-## Precisión y selección
+## Accuracy and selection
 
-No cambian dtypes, `fmad=false`, `ftz=false`, división/raíz precisas ni el modo
-cuBLAS. Binding y contexto conservan resultados exactamente iguales al control
-en las comparaciones. GEMV/DOT cambian el orden de suma: no se promete identidad
-bit a bit ni una mejora numérica universal.
+Dtypes, `fmad=false`, `ftz=false`, precise division/square root, and cuBLAS mode
+are unchanged. Binding and context retain results exactly equal to the control
+in comparisons. GEMV/DOT change summation order: neither bitwise identity
+nor a universal numerical improvement is promised.
 
-El caso float32 129×8193 de la semilla 941 hizo visible un error previo: el kernel
-serial excede rtol=5e-5/atol=5e-6 frente a NumPy y a la referencia float64. La nueva
-reducción pasa el mismo umbral. Se añadió una regresión con esos inputs; el runner
-conserva los indicadores de fallo de cada variante histórica, sin ampliar tolerancias
-ni ocultarlos. Para float64, NumPy float64 es una comparación de igual precisión,
-no un oráculo de mayor precisión.
+The float32 129×8193 case with seed 941 exposed an earlier error: the serial
+kernel exceeds rtol=5e-5/atol=5e-6 against NumPy and the float64 reference. The new
+reduction passes the same threshold. A regression with those inputs was added; the runner
+retains failure flags for every historical variant, without widening tolerances
+or hiding them. For float64, NumPy float64 is an equal-precision comparison,
+not a higher-precision oracle.
 
-Todas las **168 configuraciones con la selección final** pasan los umbrales
-registrados frente a ambas referencias. Los tres fallos registrados son el mismo
-caso serial anterior en baseline/binding/contexto, no tres problemas distintos.
-El máximo error relativo L2 de las salidas seleccionadas es 4,36e-7 en f32 y
-2,83e-14 en f64. No equivale a una garantía para cualquier input.
+All **168 configurations with the final selection** pass the recorded thresholds
+against both references. The three recorded failures are the same
+previous serial case in baseline/binding/context, not three different problems.
+Maximum relative L2 error of selected outputs is 4.36e-7 in f32 and
+2.83e-14 in f64. This is not a guarantee for every input.
 
-En GEMV 129×8193 f32, el error relativo de la semilla 941 baja de 1,59e-6 a
-1,84e-7. Hay un contraejemplo a «paralelizar siempre mejora precisión»: el DOT
-largo f64 de la semilla 942 pasa de 2,93e-16 a 2,11e-14 frente a NumPy float64;
-ambos cumplen la tolerancia, pero la nueva suma se aleja más de esa referencia.
+For GEMV 129×8193 f32, relative error with seed 941 falls from 1.59e-6 to
+1.84e-7. There is a counterexample to “parallelizing always improves accuracy”: long
+f64 DOT with seed 942 goes from 2.93e-16 to 2.11e-14 against NumPy float64;
+both meet tolerance, but the new sum is farther from that reference.
 
-## Límites y siguiente prioridad
+## Limits and next priority
 
-La reducción del coste de contexto es marginal en el agregado y no es un techo
-físico. No merece desplazar kernels o copias con mayor margen. La vía posicional
-tampoco acelera llamadas por nombre ni elimina la validación por invocación.
-Los casos cortos siguen dominados por Python/driver; las transferencias siguen
-limitando el beneficio completo. No hay pinned memory, solapamiento ni graphs
-CUDA nuevos en esta ronda.
+The reduction in context cost is marginal in the aggregate and is not a physical
+ceiling. It does not warrant displacing kernels or copies with more headroom. The positional
+path also does not accelerate named calls or eliminate per-invocation validation.
+Short cases remain dominated by Python/driver; transfers still
+limit complete benefit. There is no new pinned memory, overlap, or CUDA graph
+support in this round.
 
-La siguiente prioridad matricial es GEMV/DOT específicos de cuBLAS y aplicaciones
-con transpuestas reutilizables; el proveedor actual todavía usa GEMM para casos
-vectoriales. Las filas cortas y la geometría cooperativa necesitan más mediciones
-antes de autotuning. Para Vulkan, la mejora presente es el binding común; no se
-atribuye a un nuevo kernel ni se declara agotado el margen del ejecutor.
+The next matrix priority is cuBLAS-specific GEMV/DOT and applications
+with reusable transposes; the current provider still uses GEMM for vector
+cases. Short rows and cooperative geometry need more measurements
+before autotuning. For Vulkan, the present improvement is shared binding; it is not
+attributed to a new kernel, nor is executor headroom declared exhausted.
 
-## Verificación
+## Verification
 
-La suite completa da **1.250 pruebas pasando y una omitida** por necesitar un
-segundo dispositivo OpenCL, con OpenCL/Vulkan/CUDA obligatorios y CLBlast nativo.
-Otras **89 pruebas** validan los benchmarks. El wheel construido desde sdist pasa
-**391 pruebas CPU, con 860 omisiones GPU**, cargando el runtime empaquetado y
-comprobando independencia de imports opcionales. Ruff/formato y sintaxis Python
-3.10 pasan. Ver [detalle de verificación](verification.md).
+The complete suite has **1,250 passing tests and one skip** because a
+second OpenCL device is required, with OpenCL/Vulkan/CUDA required and native CLBlast.
+Another **89 tests** validate benchmarks. The wheel built from sdist passes
+**391 CPU tests, with 860 GPU skips**, loading the packaged runtime and
+checking independence of optional imports. Ruff/formatting and Python
+3.10 syntax pass. See [verification details](verification.md).
 
-## Reproducción
+## Reproduction
 
-Los datos locales quedan en `.artifacts/three-actions`, incluyendo intentos
-incompletos. `paired/` fue detenido por la comparación numérica del baseline;
-`paired-v2/` es exploratorio y termina con un error del runner al intentar cerrar
-OpenCL, que no expone `close()`. La limpieza ahora usa `synchronize()` en ese caso
-y guarda el informe incluso si limpiar falla; ambas rutas tienen pruebas CPU.
+Local data remain in `.artifacts/three-actions`, including incomplete
+attempts. `paired/` was stopped by the baseline numerical comparison;
+`paired-v2/` is exploratory and ends with a runner error when attempting to close
+OpenCL, which does not expose `close()`. Cleanup now uses `synchronize()` in that case
+and saves the report even if cleanup fails; both paths have CPU tests.
 
-`final-paired/` contiene la primera ejecución CUDA custom seleccionada. La tanda
-se detuvo al no alcanzar reposo antes del siguiente backend; no se relajó el gate.
-`remaining/` y `custom-repeat/` completan las mediciones con espera máxima de 300
-segundos, conservando todos los criterios de reposo. Un ajuste posterior solo de
-formato en `_cuda_gemv.py` tiene equivalencia AST comprobada y registrada.
+`final-paired/` contains the first selected CUDA custom run. The batch
+stopped because idle state was not reached before the next backend; the gate was not relaxed.
+`remaining/` and `custom-repeat/` complete measurements with a maximum wait of 300
+seconds, preserving all idle criteria. A later formatting-only adjustment
+in `_cuda_gemv.py` has checked, recorded AST equivalence.
 
-Para repetir desde un wheel local anterior compatible y una carpeta nueva:
+To repeat from a compatible previous local wheel and a new directory:
 
 ```powershell
 python -m benchmarks.isolated --worker three_actions --backends cuda-custom,cuda-cublas,opencl,vulkan --rounds 2 --repeats 31 --max-temperature 52 --max-wait-seconds 300 --control-wheel .artifacts/three-actions/before.whl --output .artifacts/three-actions/reproduction
 ```
 
-El umbral de reposo, las muestras, el error, el dispositivo y los hashes quedan
-en JSON. La asociación automática backend/UUID y otros fabricantes/SO siguen
-pendientes. La versión continúa en 0.1.0a1 sin publicación.
+Idle threshold, samples, error, device, and hashes are retained
+in JSON. Automatic backend/UUID association and other vendors/OSes remain
+pending. The version remains 0.1.0a1 without publication.

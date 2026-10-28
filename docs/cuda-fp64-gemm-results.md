@@ -1,96 +1,94 @@
-# GEMM CUDA custom float64: diagnóstico y experimento
+# Custom CUDA float64 GEMM: diagnosis and experiment
 
-La [red densa](dense-network-results.md) reveló una diferencia repetida entre
-CUDA custom y OpenCL/cuBLAS en float64. Esta iteración investiga esa operación
-antes de ampliar la API. Los resultados son locales a una RTX 5060 Ti, Windows,
-driver 617.14; no permiten concluir lo mismo para otras GPU.
+The [dense network](dense-network-results.md) revealed a repeated difference
+between custom CUDA and OpenCL/cuBLAS in float64. This iteration investigates
+that operation before expanding the API. Results are local to an RTX 5060 Ti,
+Windows, driver 617.14; they do not support the same conclusion for other GPUs.
 
-## Hipótesis y perfil
+## Hypothesis and profiling
 
-La implementación custom CUDA actual calcula cada salida float64 recorriendo K
-y leyendo ambos operandos desde memoria global. El GEMM por tiles de registros
-existente solo admite float32. OpenCL ya dispone de un tile compartido float64.
-No basta comparar el tiempo de las aplicaciones para atribuir la diferencia a
-GEMM: SGD también materializa transpuestas, reduce y evalúa funciones elementwise.
+The current custom CUDA implementation computes each float64 output by traversing
+K and reading both operands from global memory. The existing register-tiled GEMM
+only supports float32. OpenCL already has a shared float64 tile.
+Comparing application time alone is insufficient to attribute the difference to
+GEMM: SGD also materializes transposes, reduces, and evaluates elementwise functions.
 
-Se instrumentaron los lanzamientos de cuatro planes compilados con eventos CUDA
-en el stream de ejecución, conservando diez muestras de tiempo completo del plan
-sin instrumentar y tres repeticiones instrumentadas por caso. Las salidas de
-todas las repeticiones conservaron sus bits y pasaron la comprobación numérica
-contra NumPy float64. Los archivos del runtime no cambiaron durante el perfil.
+Launches from four compiled plans were instrumented with CUDA events on the
+execution stream, retaining ten full-plan timing samples without instrumentation
+and three instrumented repetitions per case. Outputs from every repetition
+preserved their bits and passed the numerical check against NumPy float64.
+Runtime files did not change during profiling.
 
-| Caso float64 | Mediana del plan sin instrumentar, ms | Fracción GEMM de los eventos GPU registrados |
+| Float64 case | Uninstrumented plan median, ms | GEMM fraction of recorded GPU events |
 | --- | ---: | ---: |
-| Inferencia, 4096×128×256×32 | 2.130 | 95.28% |
+| Inference, 4096×128×256×32 | 2.130 | 95.28% |
 | SGD, 4096×128×256×32 | 4.909 | 91.22% |
-| Inferencia, 4095×127×255×31 | 2.128 | 95.21% |
+| Inference, 4095×127×255×31 | 2.128 | 95.21% |
 | SGD, 4095×127×255×31 | 4.831 | 92.89% |
 
-Los eventos alteran el programa medido. Sus fracciones son un diagnóstico de
-los lanzamientos registrados, no una descomposición exacta del tiempo completo
-sin instrumentación. Tampoco se interpreta la resta entre tiempo de pared y
-eventos como tiempo de Python. El perfil justifica un experimento acotado de GEMM.
+Events alter the measured program. Their fractions diagnose the recorded
+launches, rather than exactly decomposing full uninstrumented time. Nor is the
+difference between wall time and events interpreted as Python time. The profile
+justifies a bounded GEMM experiment.
 
-## Candidato
+## Candidate
 
-`benchmarks/cuda_fp64_tile.py` genera un tile compartido 16×16: 256 hilos y
-4096 bytes de memoria compartida estática por bloque. Carga operandos de forma
-cooperativa y conserva exactamente K productos en orden creciente, sin añadir
-productos de padding en la última iteración. Mantiene las opciones CUDA actuales:
-sin contracción FMA, sin flush de subnormales y sin reducir precisión.
+`benchmarks/cuda_fp64_tile.py` generates a 16×16 shared tile: 256 threads and
+4096 bytes of static shared memory per block. It loads operands cooperatively
+and preserves exactly K products in increasing order, without adding padding
+products in the last iteration. It keeps the current CUDA options: no FMA
+contraction, no subnormal flushing, and no reduced precision.
 
-La generación admite matrices contiguas y broadcasting de lotes. Vectores,
-dimensiones vacías y K=0 quedan fuera del candidato; la ruta existente conserva
-esos contratos. Sus requisitos de lanzamiento se comprueban separadamente de
-los del kernel float32.
+Generation supports contiguous matrices and batch broadcasting. Vectors, empty
+dimensions, and K=0 are outside the candidate; the existing path retains those
+contracts. Its launch requirements are checked separately from the float32 kernel's.
 
-## Validación y comparación
+## Validation and comparison
 
-La comprobación nativa incluye 27 casos candidatos con dos destinos previamente
-rellenados, con NaN e infinito: 54 lanzamientos. Cubre bordes 8/15/16/17/31/32/33,
-broadcasting de rango cuatro, cancelación, desbordamiento, subnormales y ceros con
-signo. Todos conservan los bits finitos del kernel directo y sus clases NaN/+Inf/-Inf;
-no se exige conservar el payload de NaN. Nueve casos adicionales comprueban que
-vectores, vacíos y K=0 siguen fuera del candidato y conservan su resultado previo.
+Native checking includes 27 candidate cases with two destinations prefilled
+with NaN and infinity: 54 launches. It covers boundaries 8/15/16/17/31/32/33,
+rank-four broadcasting, cancellation, overflow, subnormals, and signed zeros.
+All preserve the direct kernel's finite bits and NaN/+Inf/-Inf classes; preserving
+NaN payloads is not required. Nine additional cases check that vectors, empty
+arrays, and K=0 remain outside the candidate and preserve their previous result.
 
-Muestras seleccionadas se contrastan también con productos y sumas exactos de
-fracciones de los valores binarios originales, separando redondeo del producto
-y acumulación. La equivalencia con el control no significa exactitud matemática:
-se conservan los errores de cancelación, redondeo y rango del algoritmo original.
-NumPy float64 se etiqueta como referencia de igual precisión.
+Selected samples are also checked against exact products and sums of fractions
+of the original binary values, separating product rounding and accumulation.
+Equivalence with the control does not imply mathematical exactness: cancellation,
+rounding, and range errors of the original algorithm are preserved.
+NumPy float64 is labeled as a same-precision reference.
 
-El runner `benchmarks.cuda_fp64_gemm` captura las fuentes reales del kernel
-directo, sin ejecutarlas durante la captura, y conserva dos controles con esa
-misma fuente. La comparación usa 24 GEMM y seis aplicaciones: inferencia/SGD
-pequeña, regular e impar. Cada caso tiene tres modos, 24 repeticiones y las seis
-permutaciones de orden con igual frecuencia. La salida conserva los fuentes
-capturados y permite reutilizarlos mediante `--control-report` aunque el runtime
-cambie en el futuro.
+The `benchmarks.cuda_fp64_gemm` runner captures the direct kernel's actual sources,
+without executing them during capture, and retains two controls with that same
+source. The comparison uses 24 GEMMs and six applications: small, regular, and
+odd inference/SGD. Each case has three modes, 24 repetitions, and all six order
+permutations with equal frequency. The output retains captured sources and allows
+reuse through `--control-report` even if the runtime changes in the future.
 
-Se separan GEMM con salida preasignada y matmul con asignación. Las aplicaciones
-usan tres planes independientes, estado original en cada llamada y dos alcances:
-ejecución residente y flujo completo con subidas y descarga de todas las salidas.
-Primera llamada, descubrimiento de rutas, preparación y calentamiento quedan
-fuera de las muestras repetidas. Las comprobaciones numéricas quedan fuera del
-reloj. La instrumentación de selección de rutas es común a los tres modos y
-añade trabajo Python: estos tiempos no equivalen a ejecutar el runtime sin ella.
+GEMM with preallocated output and matmul with allocation are separated.
+Applications use three independent plans, original state on every call, and two
+scopes: resident execution and the full flow with uploads and download of all
+outputs. First call, route discovery, preparation, and warm-up are excluded from
+repeated samples. Numerical checks are outside the timer. Route-selection
+instrumentation is common to all three modes and adds Python work: these times
+are not equivalent to running the runtime without it.
 
-Las dos rondas usan procesos separados y reposo observado antes de arrancar.
-Los mismos datos y fuentes se conservan entre rondas. Las muestras brutas y los
-fallos numéricos se guardan incluso cuando invalidan una comparación.
+The two rounds use separate processes and observed idle conditions before
+starting. The same data and sources are preserved across rounds. Raw samples
+and numerical failures are saved even when they invalidate a comparison.
 
-## Resultado y decisión
+## Result and decision
 
-**No se promueve el candidato.** Las dos rondas completan 60 casos, 8.640
-muestras y 9.360 comprobaciones aceptadas. No hay una mejora consistente de
-la aplicación que justifique añadir una ruta al runtime. Los kernels estrechos
-con K grande empeoran repetidamente; varios productos grandes quedan casi iguales.
+**The candidate is not promoted.** The two rounds complete 60 cases, 8,640 samples,
+and 9,360 accepted checks. There is no consistent application improvement to
+justify adding a runtime path. Narrow kernels with large K repeatedly worsen;
+several large products remain nearly unchanged.
 
-La tabla expresa tiempo candidato dividido por el promedio de las medianas
-de ambos controles. Menor que 1 favorece al candidato. R1/R2 son procesos
-independientes; las diferencias pequeñas no se tratan como ganancias firmes.
+The table expresses candidate time divided by the average of the two controls'
+medians. Below 1 favors the candidate. R1/R2 are independent processes; small
+differences are not treated as firm gains.
 
-| GEMM M×K×N | Preasignado R1 | Preasignado R2 | Con asignación R1 | Con asignación R2 |
+| GEMM M×K×N | Preallocated R1 | Preallocated R2 | With allocation R1 | With allocation R2 |
 | --- | ---: | ---: | ---: | ---: |
 | 4096×128×256 | 0.998 | 1.000 | 1.004 | 1.001 |
 | 4096×256×32 | 1.085 | 1.025 | 1.051 | 1.076 |
@@ -103,7 +101,7 @@ independientes; las diferencias pequeñas no se tratan como ganancias firmes.
 | 4095×31×255 | 1.006 | 1.013 | 1.004 | 1.006 |
 | 127×4095×255 | 1.006 | 1.029 | 0.999 | 1.027 |
 
-| Aplicación | Residente R1 | Residente R2 | Completa R1 | Completa R2 |
+| Application | Resident R1 | Resident R2 | Full R1 | Full R2 |
 | --- | ---: | ---: | ---: | ---: |
 | inference, 31×7×11×3 | 1.012 | 1.011 | 1.093 | 0.927 |
 | sgd, 31×7×11×3 | 1.070 | 0.954 | 0.961 | 1.000 |
@@ -112,40 +110,39 @@ independientes; las diferencias pequeñas no se tratan como ganancias firmes.
 | inference, 4095×127×255×31 | 1.018 | 1.023 | 1.003 | 1.004 |
 | sgd, 4095×127×255×31 | 1.028 | 1.028 | 1.008 | 1.037 |
 
-En los diez GEMM grandes, la mayor relación entre medianas de los dos
-controles es 1.038. En casos pequeños llega a 1.753; en aplicaciones pequeñas
-a 1.158. La variación limita especialmente la interpretación de micromedidas
-pequeñas. Los dos controles idénticos se conservan para hacer visible esa
-variación, no para eliminarla por promediado.
+Across the ten large GEMMs, the largest ratio between the two controls' medians
+is 1.038. It reaches 1.753 for small cases and 1.158 for small applications.
+Variation particularly limits the interpretation of small micromeasurements.
+The two identical controls are retained to expose that variation, not to eliminate
+it by averaging.
 
-Cambiar la organización de memoria manteniendo el orden y las operaciones
-aritméticas no explica aquí la diferencia histórica entre APIs. CUDA compila
-GEMM con `--fmad=false`; el programa GEMM OpenCL usa `acc += left*right` y no
-incluye `FP_CONTRACT OFF`. Esto permite investigar contracción, pero el código
-fuente por sí solo no demuestra qué instrucciones float64 ejecutó OpenCL.
-Los lowerers elementwise/map-reduce OpenCL sí desactivan la contracción.
+Changing memory organization while retaining arithmetic order and operations
+does not explain the historical difference between APIs here. CUDA compiles
+GEMM with `--fmad=false`; the OpenCL GEMM program uses `acc += left*right` and
+does not include `FP_CONTRACT OFF`. This supports investigating contraction, but
+source code alone does not establish which float64 instructions OpenCL executed.
+OpenCL elementwise/map-reduce lowerers do disable contraction.
 
-Una investigación posterior acotada puede guardar PTX/binarios de estas
-formas y comparar fuentes idénticas cambiando únicamente la contracción.
-Sería una política de redondeo distinta: necesita validación de error, no
-igualdad bit a bit, y no autoriza cambiar los valores predeterminados.
+A later bounded investigation can save PTX/binaries for these shapes and compare
+identical sources changing only contraction. This would be a different rounding
+policy: it needs error validation, not bitwise equality, and does not authorize
+changing defaults.
 
-La verificación dirigida comprende 19 pruebas CPU de generación/indexación
-y siete del protocolo de captura, restauración, validación y planes. No se
-ejecutó la suite global. El runtime, sus defaults y la API pública permanecen
-sin cambios.
+Targeted verification comprises 19 CPU generation/indexing tests and seven tests
+of capture, restoration, validation, and plan protocols. The global suite was
+not run. The runtime, its defaults, and public API remain unchanged.
 
-QA independiente: **APPROVE**. Se reejecutaron las 26 pruebas CPU, se verificaron
-las tablas y muestras, se reprodujeron las 23 fuentes de control sin lanzarlas y
-se comprobaron 172 puntos de los oráculos exactos. Los 33 archivos del runtime
-son idénticos al estado anterior. La revisión no volvió a ejecutar la GPU.
+Independent QA: **APPROVE**. All 26 CPU tests were rerun, tables and samples were
+verified, all 23 control sources were reproduced without launching them, and
+172 exact-oracle points were checked. All 33 runtime files are identical to the
+previous state. The review did not rerun the GPU.
 
-## Evidencia local
+## Local evidence
 
-Los informes y scripts privados se conservan en
+Private reports and scripts are retained in
 `.artifacts/iterations-2026-10-22/`: `cuda-fp64-profile.json`,
 `profile_cuda_fp64.py`, `cuda-fp64-correctness.json`, `validate_cuda_fp64_tile.py`,
-`cuda-fp64-tile-cpu.xml` y `cuda-fp64-gemm/`. Este último contiene los dos informes,
-la sesión y el resumen reproducible. El perfil conserva eventos por lanzamiento,
-formas, hashes de fuentes y resultados, estado de la GPU y muestras.
-No se incluyen estos artefactos locales en el paquete distribuido.
+`cuda-fp64-tile-cpu.xml`, and `cuda-fp64-gemm/`. The latter contains the two reports,
+the session, and the reproducible summary. The profile retains per-launch events,
+shapes, source and result hashes, GPU state, and samples.
+These local artifacts are not included in the distributed package.

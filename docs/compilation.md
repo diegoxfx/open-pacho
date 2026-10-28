@@ -1,8 +1,8 @@
-# Compilación opcional de funciones
+# Optional function compilation
 
-Implementado en 0.1.0a1, 2026-09-06. La ejecución directa sigue siendo el valor
-predeterminado. `compile` optimiza una función delimitada y mantiene el backend
-de sus arrays. No crea un grafo lazy global ni cambia de CPU a GPU automáticamente.
+Implemented in 0.1.0a1, 2026-09-06. Direct execution remains the default.
+`compile` optimizes a bounded function and keeps its arrays' backend. It does
+not create a global lazy graph or automatically switch from CPU to GPU.
 
 ```python
 import numpy as np
@@ -10,226 +10,223 @@ import openpacho as pacho
 
 
 @pacho.compile
-def energia(a, b, c):
+def energy(a, b, c):
     x = a * b + c
     y = 2 * x
     return np.sum(y * y, axis=-1)
 
 
 host = np.ones((1024, 32), dtype=np.float32)
-original = energia(host, host, host)  # NumPy ejecuta la función original
-# También "vulkan", "numpy" o "cuda"; CUDA fusiona los grupos admitidos.
+original = energy(host, host, host)  # NumPy executes the original function
+# Also "vulkan", "numpy", or "cuda"; CUDA fuses supported groups.
 with pacho.use_backend("opencl"):
     a = pacho.asarray(host)
-    resultado = energia(a, a, a)
-    print(energia.explain(a, a, a))
-    print(energia.cache_info())
-    host_resultado = pacho.asnumpy(resultado)
+    result = energy(a, a, a)
+    print(energy.explain(a, a, a))
+    print(energy.cache_info())
+    host_result = pacho.asnumpy(result)
 ```
 
-Las formas `pacho.compile(funcion)`, `@pacho.compile` y `@pacho.compile()` son
-equivalentes. Las asignaciones `x` e `y` no cortan la captura. El `return` establece
-las salidas del plan: un array o una tupla de arrays. El resultado público vuelve
-a ser un ndarray ordinario residente; descargarlo requiere `asnumpy` o `item`.
+The forms `pacho.compile(function)`, `@pacho.compile`, and `@pacho.compile()` are
+equivalent. Assignments to `x` and `y` do not interrupt capture. The `return`
+establishes plan outputs: an array or a tuple of arrays. The public result is
+again an ordinary resident ndarray; downloading it requires `asnumpy` or `item`.
 
-## Especialización y escalares
+## Specialization and scalars
 
-La primera llamada con arrays OpenPacho captura el cuerpo Python, genera un plan
-y ejecuta sus pasos. Las siguientes llamadas compatibles reenlazan buffers y
-escalares, sin ejecutar otra vez el cuerpo Python. Los escalares calculados a
-partir de argumentos escalares se recalculan en host por llamada, sin descargar
-arrays. No se congela la tasa de la primera llamada:
+The first call with OpenPacho arrays captures the Python body, generates a plan,
+and executes its steps. Subsequent compatible calls rebind buffers and scalars
+without executing the Python body again. Scalars computed from scalar arguments
+are recalculated on the host per call without downloading arrays. The first
+call's rate is not frozen:
 
 ```python
 @pacho.compile()
-def actualizar(x, b, tasa=0.01):
-    return (1 - tasa) * x + tasa * b
+def update(x, b, rate=0.01):
+    return (1 - rate) * x + rate * b
 
 
-x = actualizar(a, a, 0.01)
-x = actualizar(x, a, 0.02)  # reutiliza el plan; cambia el valor de tasa
+x = update(a, a, 0.01)
+x = update(x, a, 0.02)  # reuses the plan; changes the rate value
 ```
 
-Las formas, ejes y otros parámetros que controlan la estructura se declaran
-estáticos. Cambiar su valor genera otra variante:
+Shapes, axes, and other parameters controlling structure are declared static.
+Changing their value generates another variant:
 
 ```python
-@pacho.compile(static_argnames=("eje",), cache_size=16)
-def promedio(a, eje=-1):
-    return np.mean(a, axis=eje)
+@pacho.compile(static_argnames=("axis",), cache_size=16)
+def average(a, axis=-1):
+    return np.mean(a, axis=axis)
 ```
 
-Cada función tiene una LRU de hasta 32 planes por defecto. La clave incluye
-forma/dtype y objeto backend de cada array, tipo de cada escalar y valores de los
-argumentos estáticos. Todos los arrays públicos son contiguos; aún no existe una
-clave de strides arbitrarios ni caché persistente de planes en disco.
-`clear_cache()` libera los planes y reinicia estadísticas; los backends pueden
-conservar sus programas y buffers libres. `explain(*args)` captura si hace falta,
-sin ejecutar kernels, y muestra backend, BLAS, tipos, formas y pasos. No es un
-perfilador de memoria ni mide sincronizaciones del controlador.
+Each function has an LRU of up to 32 plans by default. The key includes each
+array's shape/dtype and backend object, each scalar's type, and static argument
+values. All public arrays are contiguous; there is not yet an arbitrary-stride
+key or a persistent disk plan cache.
+`clear_cache()` releases plans and resets statistics; backends may retain their
+programs and free buffers. `explain(*args)` captures if needed, without executing
+kernels, and shows backend, BLAS, types, shapes, and steps. It is not a memory
+profiler and does not measure driver synchronization.
 
-Las llamadas que suministran todos los parámetros por posición evitan reconstruir
-el binding de la firma, si esta solo declara parámetros posicionales o
-posicionales/por nombre. Siguen validándose los tipos y la especialización en cada
-llamada; los escalares se reenlazan. Argumentos por nombre, defaults omitidos y
-parámetros keyword-only conservan la ruta general. No requiere cambiar el código
-del usuario ni llamar a `prepare`.
-La captura de una variante nueva sí enlaza la firma; la ganancia repetida corresponde
-a llamadas que reutilizan una especialización en caché.
+Calls supplying every parameter positionally avoid rebuilding signature bindings
+if the signature declares only positional or positional/keyword parameters.
+Types and specialization are still validated on every call; scalars are rebound.
+Keyword arguments, omitted defaults, and keyword-only parameters retain the
+general path. This requires no user-code change or `prepare` call.
+Capturing a new variant does bind the signature; the repeated gain applies to
+calls reusing a cached specialization.
 
-Para repetir una especialización sin buscarla en la LRU en cada llamada:
+To repeat a specialization without looking it up in the LRU on every call:
 
 ```python
-ejecutar = energia_compilada.prepare(a, b, c)
-resultado = ejecutar(otro_a, otro_b, otro_c)
+execute = compiled_energy.prepare(a, b, c)
+result = execute(other_a, other_b, other_c)
 ```
 
-`prepare` devuelve un callable que valida forma, dtype y contexto de cada array,
-tipo de escalares dinámicos y valores estáticos. Conserva los valores por defecto
-y admite argumentos por nombre; no conserva los arrays de ejemplo ni congela
-escalares dinámicos. Una incompatibilidad produce un error, no una recaptura.
-Las salidas de llamadas sucesivas son independientes. Es un ejecutor Python
-preparado, no código nativo ni un grafo de comandos GPU persistente.
+`prepare` returns a callable that validates each array's shape, dtype, and context,
+dynamic scalar types, and static values. It preserves defaults and accepts keyword
+arguments; it neither retains example arrays nor freezes dynamic scalars.
+An incompatibility raises an error rather than recapturing. Outputs of successive
+calls are independent. This is a prepared Python executor, not native code or
+a persistent GPU command graph.
 
-## Operaciones y optimización actual
+## Current operations and optimization
 
-`compile(..., padding=True)` y `@compile(padding=True)` habilitan el
-[padding opcional de GEMM](padding.md). `prepare` hereda esa política. Los pasos
-admitidos usan buffers físicos alineados y recortan en GPU antes de continuar;
-las formas lógicas no cambian. El valor predeterminado es `False`, y la ruta
-habitual se conserva cuando backend, proveedor, dtype o forma no lo admiten.
-`explain` muestra los pasos aplicados y su memoria privada solicitada.
+`compile(..., padding=True)` and `@compile(padding=True)` enable
+[optional GEMM padding](padding.md). `prepare` inherits that policy. Supported
+steps use aligned physical buffers and crop on GPU before continuing; logical
+shapes do not change. The default is `False`, and the usual path is retained
+when backend, provider, dtype, or shape is unsupported. `explain` shows applied
+steps and their requested private memory.
 
-Con OpenCL y `blas="clblast"`, un matmul compilado float32/64 puede consumir
-directamente el almacenamiento original de una transpuesta completa 2D privada,
-como en `a.T @ b`, `a @ b.T` o `a.T @ b.T`. Debe tener un único consumidor y no
-ser una salida de la función. El backend prepara GEMM con los flags de
-transposición y leading dimensions correspondientes; `explain` lo identifica
-como `layout_matmul`. No hace falta cambiar el cuerpo NumPy de la función.
-Las transpuestas compartidas o devueltas, los casos vacíos y las capacidades no
-admitidas conservan su materialización. El padding explícito elegible se resuelve
-primero. La ejecución eager conserva las copias habituales; esto no añade vistas
-mutables ni retiene las entradas de captura. Los flags pueden cambiar la elección
-de kernels y el redondeo del proveedor, por lo que no se promete una ganancia
-general ni igualdad bit a bit con la ruta que materializa la transpuesta.
+With OpenCL and `blas="clblast"`, compiled float32/64 matmul can directly consume
+the original storage of a private complete 2D transpose, as in `a.T @ b`,
+`a @ b.T`, or `a.T @ b.T`. It must have a single consumer and must not be a
+function output. The backend prepares GEMM with the corresponding transpose
+flags and leading dimensions; `explain` identifies it as `layout_matmul`.
+The function's NumPy body need not change. Shared or returned transposes, empty
+cases, and unsupported capabilities retain materialization. Eligible explicit
+padding is resolved first. Eager execution retains its usual copies; this adds
+no mutable views and retains no capture inputs. Flags can change the provider's
+kernel choice and rounding, so neither a general gain nor bitwise equality with
+the materialized-transpose path is promised.
 
-La captura reutiliza las reglas de ndarray: aritmética, broadcasting y promoción
-de NumPy 2, `where(condition, x, y)`, reducciones `sum`/`mean`/`min`/`max`, matmul con
-broadcasting por lotes, reshape, slicing, transposición, diagonales y norma
-euclídea/Frobenius. `where` promueve solo `x` e `y` y admite condiciones bool o
-numéricas. Ambas ramas se evalúan antes de seleccionar. Se admiten constructores
-como `zeros_like`, `ones_like` y `pacho.full` con parámetros constantes compatibles.
-La cobertura y dtypes también dependen del backend. En los pasos `reduce` y
-`map_reduce`, `explain` indica `operation`: sum, min o max. Los extremos conservan
-dtype, propagan NaN y usan la misma regla de empates de cero que eager; ver
-[compatibilidad](compatibility.md#extremos-por-ejes).
+Capture reuses ndarray rules: arithmetic, broadcasting and NumPy 2 promotion,
+`where(condition, x, y)`, `sum`/`mean`/`min`/`max` reductions, matmul with batch
+broadcasting, reshape, slicing, transposition, diagonals, and Euclidean/Frobenius
+norms. `where` promotes only `x` and `y` and accepts bool or numeric conditions.
+Both branches are evaluated before selection. Constructors such as `zeros_like`,
+`ones_like`, and `pacho.full` with compatible constant parameters are supported.
+Coverage and dtypes also depend on the backend. In `reduce` and `map_reduce`
+steps, `explain` indicates `operation`: sum, min, or max. Extrema preserve dtype,
+propagate NaN, and use eager's zero-tie rule; see
+[compatibility](compatibility.md#extrema-along-axes).
 
-OpenCL y CUDA también preparan `min/max` float32 sobre entradas materializadas
-como `map_reduce`, aunque no haya un productor que fusionar. Las fronteras de
-productores compartidos o devueltos se conservan. Vulkan, los otros dtypes y las
-sumas mantienen su selección anterior. La [comparación de planes de extremos](extrema-planning-results.md)
-documenta la ganancia medida y las regresiones que impiden extenderla a Vulkan.
+OpenCL and CUDA also prepare float32 `min/max` on materialized inputs as
+`map_reduce`, even without a producer to fuse. Shared or returned producer
+boundaries are preserved. Vulkan, other dtypes, and sums keep their previous
+selection. The [extrema plan comparison](extrema-planning-results.md) documents
+the measured gain and regressions preventing extension to Vulkan.
 
-El [generador aleatorio](random.md) tiene estado: sus llamadas se rechazan durante
-`compile`/`fuse` antes de consumir contadores, incluso desde una closure. Genera
-los inputs aleatorios fuera y pásalos como argumentos; no se congela una muestra
-de la captura para reutilizarla en todas las ejecuciones.
+The [random generator](random.md) is stateful: its calls are rejected during
+`compile`/`fuse` before consuming counters, even from a closure. Generate random
+inputs outside and pass them as arguments; a capture sample is not frozen for
+reuse in every execution.
 
-- **OpenCL:** fusiona cadenas elemento a elemento y productores elementwise con
-  `sum`/`min`/`max`, respetando conversiones intermedias y dtype de acumulación. `x*x` cuenta
-  como un consumidor de x; no obliga a almacenar x. Un productor compartido entre
-  consumidores diferentes o devuelto por la función se materializa. Map-reduce
-  usa parciales compactos cuando la reducción es grande; un paso lógico no promete
-  un solo kernel. Gather y matmul conservan sus fronteras salvo las transpuestas
-  privadas CLBlast descritas arriba y el patrón privado `b - A @ x` con GEMV
-  custom compatible. No hay eliminación general de expresiones equivalentes ni
-  epílogos dentro del proveedor CLBlast.
-- **Vulkan:** fusiona cadenas elemento a elemento con escalares por valor y
-  productores con su reducción, con las mismas fronteras de consumidores y
-  salidas públicas. Map-reduce usa acumulación tipada, grupos cooperativos y
-  parciales compactos. Reutiliza pipelines, buffers y recursos de comandos. Agrupa el envío de
-  comandos de cada invocación sincrónicamente en host y los ejecuta de forma
-  asíncrona en GPU; no espera al resultado ni crea un grafo lazy global. Un grupo
-  se divide si se requiere sincronizar o se llega al límite de recursos pendientes.
-- **NumPy:** ejecuta primitivas NumPy. No genera código CPU nativo; envolver
-  arrays OpenPacho CPU no promete acelerar NumPy. Con inputs NumPy nativos se
-  ejecuta directamente la función original.
+- **OpenCL:** fuses elementwise chains and elementwise producers with
+  `sum`/`min`/`max`, respecting intermediate conversions and accumulator dtype.
+  `x*x` counts as one consumer of x; it does not force storage of x. A producer
+  shared between different consumers or returned by the function is materialized.
+  Map-reduce uses compact partials for large reductions; one logical step does
+  not promise a single kernel. Gather and matmul keep their boundaries except
+  for the private CLBlast transposes above and the private `b - A @ x` pattern
+  with compatible custom GEMV. There is no general elimination of equivalent
+  expressions or epilogues inside the CLBlast provider.
+- **Vulkan:** fuses elementwise chains with by-value scalars and producers with
+  their reduction, with the same consumer and public-output boundaries.
+  Map-reduce uses typed accumulation, cooperative groups, and compact partials.
+  It reuses pipelines, buffers, and command resources. It groups each invocation's
+  command submission synchronously on the host and executes asynchronously on
+  GPU; it does not wait for the result or create a global lazy graph. A group
+  splits if synchronization is required or the pending-resource limit is reached.
+- **NumPy:** executes NumPy primitives. It does not generate native CPU code;
+  wrapping OpenPacho CPU arrays does not promise to accelerate NumPy. With native
+  NumPy inputs, the original function executes directly.
 
-La selección `where` también puede combinarse en los grupos elementwise y
-map-reduce admitidos por `compile`/`fuse`; no evalúa ramas de forma perezosa ni
-admite la forma de un argumento o el keyword `where=` de ufuncs. Sus resultados
-y límites están en [selección condicional](compatibility.md#selección-condicional)
-y [resultados de selección](selection-results.md).
+`where` selection can also combine into elementwise and map-reduce groups
+supported by `compile`/`fuse`; it neither evaluates branches lazily nor supports
+the one-argument form or ufunc `where=` keyword. Results and limits are in
+[conditional selection](compatibility.md#conditional-selection) and
+[selection results](selection-results.md).
 
-CLBlast sigue detrás de una operación matmul. Se escoge mediante el backend
-OpenCL antes de crear arrays; no limita la extensión del IR. Elegir otro proveedor
-BLAS todavía crea otro contexto, por lo que no es intercambiable sobre buffers
-ya existentes sin transferencia explícita.
+CLBlast remains behind a matmul operation. It is selected through the OpenCL
+backend before creating arrays; it does not limit IR extension. Choosing another
+BLAS provider still creates another context, so it cannot be swapped on existing
+buffers without explicit transfer.
 
-Los temporales vivos pertenecen a cada invocación. El plan no guarda los arrays
-pasados durante la captura; deja de referenciar intermedios al agotar sus usos.
-Los backends conservan recursos en vuelo mientras sean necesarios. La caché de
-planes tiene lock y se verifican llamadas concurrentes con inputs distintos.
+Live temporaries belong to each invocation. The plan does not store arrays passed
+during capture; it stops referencing intermediates when their uses are exhausted.
+Backends retain in-flight resources as long as needed. The plan cache has a lock,
+and concurrent calls with different inputs are tested.
 
-## Límites del contrato
+## Contract limits
 
-La función debe ser pura. Este trazador por sobrecarga no puede detectar todo
-efecto de Python: modificar una lista global o leer un global mutable es
-responsabilidad del autor y queda fuera del contrato. Pasa datos cambiantes como
-argumentos. No hay una reejecución silenciosa en CPU cuando falla la captura.
+The function must be pure. This operator-overloading tracer cannot detect every
+Python effect: modifying a global list or reading a mutable global is the author's
+responsibility and outside the contract. Pass changing data as arguments.
+There is no silent CPU reexecution when capture fails.
 
-No se admiten mutación de arrays, `out=`, lecturas host, condiciones Python
-dependientes de arrays/escalares dinámicos, llamadas compiladas anidadas, argumentos
-array dentro de contenedores, `*args`/`**kwargs`, ni Python arbitrario dentro del
-plan. Funciones auxiliares puras sin decorar sí pueden participar en la captura.
-Las constantes array deben convertirse antes y pasarse explícitamente; no se
-capturan arrays de una clausura. Los constructores `np.*` sin argumentos array
-no pasan necesariamente por despacho NumPy y no son portables automáticamente.
+Array mutation, `out=`, host reads, Python conditions depending on arrays/dynamic
+scalars, nested compiled calls, array arguments inside containers, `*args`/`**kwargs`,
+and arbitrary Python within the plan are unsupported. Undecorated pure helper
+functions can participate in capture. Array constants must be converted first
+and passed explicitly; closure arrays are not captured. `np.*` constructors
+without array arguments do not necessarily pass through NumPy dispatch and are
+not automatically portable.
 
-Un bucle Python con límites estáticos se desenrolla durante la captura; no se
-convierte en un bucle nativo de GPU. Para muchas iteraciones, compila un paso y
-mantén el bucle fuera. Los solvers de `examples/solvers.py` ya reutilizan planes de actualización,
-conservando las comprobaciones de validez y residuo real en cada iteración.
-En GPU, el residual y su norma escalada se calculan mediante un plan común.
-La norma es una operación propia del IR, conservando su estabilidad al compilar.
-El patrón `b - A @ x` puede fusionar GEMV y resta si el producto es privado,
-los dtypes flotantes coinciden y el proveedor es custom OpenCL o Vulkan. Un
-producto compartido/devuelto o CLBlast conserva su frontera. CG y descenso más
-pronunciado usan direcciones normalizadas y no forman el cuadrado de la norma
-para sus coeficientes. No se relaja la tolerancia ni la frecuencia de chequeo.
-Compilar pasos no elimina esas observaciones host ni garantiza ganar a NumPy.
+A Python loop with static bounds is unrolled during capture; it is not converted
+into a native GPU loop. For many iterations, compile one step and keep the loop
+outside. Solvers in `examples/solvers.py` already reuse update plans, preserving
+validity and true-residual checks at every iteration. On GPU, the residual and
+its scaled norm are computed through a common plan. The norm is an IR operation
+in its own right, preserving stability under compilation. The `b - A @ x` pattern
+can fuse GEMV and subtraction if the product is private, floating dtypes match,
+and the provider is custom OpenCL or Vulkan. A shared/returned product or CLBlast
+retains its boundary. CG and steepest descent use normalized directions and do
+not form the squared norm for their coefficients. Tolerance and checking frequency
+are not relaxed. Compiling steps does not remove those host observations or
+guarantee beating NumPy.
 
-`fuse` continúa disponible sobre el mismo IR para un único resultado elemento a
-elemento. Retraza cada llamada; para trabajo repetido, utiliza `compile`.
+`fuse` remains available over the same IR for a single elementwise result.
+It retraces every call; use `compile` for repeated work.
 
-La [arquitectura aceptada](execution-architecture-proposal.md) describe extensiones
-futuras. El [análisis de gaps](gaps-and-optimization.md) cuantifica el alcance actual.
+The [accepted architecture](execution-architecture-proposal.md) describes future
+extensions. The [gap analysis](gaps-and-optimization.md) quantifies current scope.
 
-## CUDA inicial y aplicaciones externas
+## Initial CUDA and external applications
 
-Internamente, el backend puede proporcionar `create_lowering()` y un contexto
-`execution_scope()` para agrupar una ejecución. El plan enlaza estos métodos al
-prepararse; no decide por nombres ni los renegocia en cada operación. Si no hay
-lowerer usa las primitivas del backend elegido. Los errores de preparación o
-ejecución se propagan, sin cambiar de backend ni relajar precisión.
+Internally, a backend can provide `create_lowering()` and an `execution_scope()`
+context to group execution. The plan binds these methods during preparation;
+it does not decide by names or renegotiate them on every operation. Without a
+lowerer it uses the chosen backend's primitives. Preparation or execution errors
+propagate without switching backend or relaxing precision.
 
-CUDA reutiliza captura y planes. `backend.create_lowering()` enlaza su
-`CUDALowering`, que compila con NVRTC los grupos elementwise/map-reduce admitidos.
-Las reducciones fusionadas usan 128 lanes y chunks de hasta 4096 términos; NVRTC conserva
-`fmad=false` y `ftz=false`. Matmul y BLAS siguen siendo pasos separados.
-Cada módulo CUDA compilado conserva un vector de argumentos `ctypes` con
-almacenamiento host estable. Cada llamada copia los escalares y las direcciones
-de dispositivo en ese vector bajo el lock existente antes del enqueue; la plantilla
-no retiene arrays ni escalares del llamador. Las asignaciones siguen en `_pending`
-hasta `synchronize()`. La LRU de 128 variantes y `close()`, después de sincronizar,
-liberan el módulo y el vector. Esta optimización de despacho no cambia kernels,
-matemática, contextos ni stream; ver [resultados de despacho CUDA](cuda-dispatch-results.md).
-`compile` no amplía los dtypes/operaciones del [contrato CUDA](cuda.md); el
-acumulador bool en reducciones no está admitido, aunque las entradas bool sí
-pueden reducirse con acumulador float32/64. Las normas estables float32/64 sí están
-disponibles en CUDA eager y compilado, con ambos proveedores BLAS; graphs siguen
-pendientes. Los solvers son [ejemplos externos](../examples/README.md), no una
-extensión del compilador, y sus algoritmos no cambiaron al habilitar CUDA.
-Consulta los [resultados de fusión CUDA](cuda-fusion-results.md). Los patrones
-optimizados deben corresponder a operaciones genéricas y beneficiar funciones
-equivalentes del usuario.
+CUDA reuses capture and plans. `backend.create_lowering()` binds its
+`CUDALowering`, which compiles supported elementwise/map-reduce groups with NVRTC.
+Fused reductions use 128 lanes and chunks of up to 4096 terms; NVRTC retains
+`fmad=false` and `ftz=false`. Matmul and BLAS remain separate steps.
+Each compiled CUDA module retains a `ctypes` argument vector with stable host
+storage. Each call copies scalars and device addresses into that vector under
+the existing lock before enqueue; the template retains no caller arrays or
+scalars. Allocations remain in `_pending` until `synchronize()`. The 128-variant
+LRU and `close()`, after synchronization, release the module and vector.
+This dispatch optimization changes no kernels, mathematics, contexts, or stream;
+see [CUDA dispatch results](cuda-dispatch-results.md).
+`compile` does not expand dtypes/operations in the [CUDA contract](cuda.md);
+bool accumulators in reductions are unsupported, although bool inputs can be
+reduced with float32/64 accumulators. Stable float32/64 norms are available in
+eager and compiled CUDA, with both BLAS providers; graphs remain pending.
+Solvers are [external examples](../examples/README.md), not a compiler extension,
+and their algorithms did not change when enabling CUDA. See the
+[CUDA fusion results](cuda-fusion-results.md). Optimized patterns must correspond
+to generic operations and benefit equivalent user functions.

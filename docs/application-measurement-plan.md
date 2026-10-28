@@ -1,34 +1,35 @@
-# Medir aplicaciones además de primitivas
+# Measuring applications as well as primitives
 
-Plan y primera suite del 2026-09-08. Los solvers anteriores usan almacenamiento
-denso de una matriz tridiagonal SPD con diagonal 2.5 y bandas -1, condición ≤9.
-Ese control sirve para repetir resultados e iteraciones, pero no representa la
-diversidad de problemas densos, condicionamientos ni matrices de aplicaciones.
-Tampoco es evidencia para priorizar soporte disperso, que sigue fuera de alcance.
+Plan and first suite dated 2026-09-08. The previous solvers use dense storage
+for an SPD tridiagonal matrix with diagonal 2.5 and off-diagonals -1, condition
+number ≤9. That control supports repeatable results and iteration counts, but
+does not represent the diversity of dense problems, conditioning, or application
+matrices. Nor is it evidence for prioritizing sparse support, which remains
+out of scope.
 
-## Primera ampliación implementada
+## First implemented expansion
 
-`benchmarks/applications.py` contiene dos patrones aplicados con datos sintéticos
-deterministas. No se presentan como resultados sobre datasets de producción.
+`benchmarks/applications.py` contains two applied patterns with deterministic
+synthetic data. These are not presented as results on production datasets.
 
-| Carga | Cálculo | Qué revela |
+| Workload | Computation | What it reveals |
 | --- | --- | --- |
-| Covarianza muestral | Centrado por media de columnas; `center.T @ center / (n-1)` | Reducción por eje, broadcasting, materialización de transpuesta y GEMM rectangular. |
-| Regresión ridge | 20 pasos de `w -= rate * (Xt @ (X @ w-y) + lambda*w)` | Reutilización de matriz y transpuesta preparada, dos GEMV rectangulares por paso y actualización fusionada. |
+| Sample covariance | Centering by column mean; `center.T @ center / (n-1)` | Axis reduction, broadcasting, transpose materialization, and rectangular GEMM. |
+| Ridge regression | 20 steps of `w -= rate * (Xt @ (X @ w-y) + lambda*w)` | Reuse of a matrix and prepared transpose, two rectangular GEMVs per step, and a fused update. |
 
-Formas completas: 4096×128 y 16384×256, float32/64. Semilla 47. Ridge usa
-`rate=0.25/n`, `lambda=0.1`, datos normales escalados por `1/sqrt(d)` y RHS con
-ruido. Los veinte pasos son un **control de trabajo fijo**, no una afirmación de
-convergencia ni el mejor optimizador para ese problema. Se publica objetivo final,
-norma del gradiente y error respecto a la misma trayectoria float64.
+Full shapes: 4096×128 and 16384×256, float32/64. Seed 47. Ridge uses
+`rate=0.25/n`, `lambda=0.1`, normal data scaled by `1/sqrt(d)`, and a noisy RHS.
+The twenty steps are a **fixed-work control**, not a claim of convergence or of
+the best optimizer for that problem. The final objective, gradient norm, and
+error against the same float64 trajectory are published.
 
-Cada implementación recibe los mismos inputs. Se conserva NumPy directo con
-1/8 hilos, OpenCL custom/CLBlast, Vulkan, CUDA custom/cuBLAS opcional y CuPy;
-OpenPacho tiene controles eager
-y compiled. La transpuesta de ridge se materializa una vez y se cronometra como
-preparación. El modo residente reutiliza esa preparación; el modo completo incluye
-subida, preparación, cálculo y descarga. En covarianza, el centrado y la transpuesta
-del array centrado forman parte de cada cálculo. No se esconde ese coste.
+Each implementation receives the same inputs. Direct NumPy with 1/8 threads,
+OpenCL custom/CLBlast, Vulkan, optional CUDA custom/cuBLAS, and CuPy are retained;
+OpenPacho has eager and compiled controls. The ridge transpose is materialized
+once and timed as preparation. Resident mode reuses that preparation; full mode
+includes upload, preparation, computation, and download. In covariance, centering
+and transposing the centered array are part of each computation. That cost is
+not hidden.
 
 ```powershell
 .venv/Scripts/python.exe -m benchmarks.applications --quick --backends "" --output .artifacts/benchmarks/applications-cpu.json
@@ -36,90 +37,92 @@ del array centrado forman parte de cada cálculo. No se esconde ese coste.
 .venv/Scripts/python.exe -m benchmarks.applications --irregular --repeats 7 --output .artifacts/benchmarks/applications-irregular.json
 ```
 
-El informe registra primera llamada/compilación, preparación, residencia,
-transferencias y diagnósticos fuera del cronómetro. La referencia float64 de los
-casos float64 es de igual precisión, no un oráculo. Las métricas de precisión
-adversa con Decimal siguen complementando estas mediciones a escala.
+The report records first call/compilation, preparation, residency, transfers,
+and diagnostics outside the timer. The float64 reference for float64 cases has
+the same precision and is not an oracle. Adversarial accuracy metrics using
+Decimal continue to complement these measurements at scale.
 
-El perfil `--irregular` usa 4095×127 y 4097×129 en ambas precisiones y cargas.
-Permite comparar dimensiones impares a ambos lados de las potencias de dos del
-caso 4096×128. `tests/test_irregular_workloads.py` añade 144 combinaciones:
-GEMM rectangular alrededor de tiles 16/32/64/128, tamaños pares no potencia de dos,
-GEMV, reducciones por ambos ejes y broadcasting por lotes impares. Los solvers
-cuadrados de tamaños 31/65/129 usan matrices densas SPD diferentes de la familia
-tridiagonal, comparan sistema ordinario/preparado y verifican residuo independiente.
-No se pasa una matriz rectangular a un solver cuya API exige un sistema cuadrado.
+The `--irregular` profile uses 4095×127 and 4097×129 for both precisions and
+workloads. It compares odd dimensions on either side of the powers of two in
+the 4096×128 case. `tests/test_irregular_workloads.py` adds 144 combinations:
+rectangular GEMM around tiles 16/32/64/128, even non-power-of-two sizes, GEMV,
+reductions along both axes, and odd-batch broadcasting. Square solvers of sizes
+31/65/129 use dense SPD matrices outside the tridiagonal family, compare ordinary
+and prepared systems, and verify an independent residual. A rectangular matrix
+is not passed to a solver whose API requires a square system.
 
-Desde 2026-09-12, `--backends` también admite `cuda-cublas,cuda-custom`.
-Son rutas del backend CUDA inicial; `compiled` captura el plan y fusiona los grupos
-elementwise/map-reduce admitidos mediante `CUDALowering`. Matmul y BLAS permanecen
-separados. Actualmente CUDA también admite normas estables y los ejemplos de
-solvers; las entradas bool pueden reducirse con acumulador flotante explícito,
-pero la acumulación bool y los graphs siguen fuera de alcance. Los JSON identifican
-los planes como `compiler_lowering: backend-plan` y registran
-las versiones de bibliotecas nativas. La [ronda de fusión CUDA](cuda-fusion-results.md)
-documenta ese alcance; la [ronda CUDA inicial](cuda-initial-results.md) conserva las
-mediciones base al comparar tiempos y errores.
+Since 2026-09-12, `--backends` also supports `cuda-cublas,cuda-custom`.
+These are paths in the initial CUDA backend; `compiled` captures the plan and
+fuses supported elementwise/map-reduce groups through `CUDALowering`. Matmul and
+BLAS remain separate. CUDA now also supports stable norms and the solver
+examples; bool inputs can be reduced with an explicit floating accumulator,
+but bool accumulation and graphs remain out of scope. The JSON files identify
+plans as `compiler_lowering: backend-plan` and record native library versions.
+The [CUDA fusion round](cuda-fusion-results.md) documents that scope; the
+[initial CUDA round](cuda-initial-results.md) retains baseline measurements for
+comparing timings and errors.
 
-## Nuevas familias acordadas
+## Agreed new families
 
-Los solvers actuales viven en `examples/solvers.py`, fuera del paquete. Nuevos
-algoritmos de dominio seguirán esa separación, con un ejemplo legible y un runner
-independiente para cronometrar; no se añade un framework neuronal o físico al runtime.
+The current solvers live in `examples/solvers.py`, outside the package. New
+domain algorithms will maintain that separation, with a readable example and
+an independent timing runner; no neural or physics framework is added to the runtime.
 
-| Familia propuesta | Primer caso | Qué revela | Validación |
+| Proposed family | First case | What it reveals | Validation |
 | --- | --- | --- | --- |
-| Red densa, implementada | Inferencia de dos capas con tanh y un paso SGD con gradientes explícitos, en `examples/dense_network.py` | GEMM rectangular, bias/broadcasting, activaciones, transpuestas y temporales | Todos los gradientes frente a diferencias finitas en un caso pequeño; errores de predicción, loss, gradientes y parámetros; misma actualización en todas las referencias |
-| Osciladores acoplados, implementados | Pasos de velocity-Verlet en sistema armónico denso SPD, con matriz de rigidez reutilizada | GEMV repetido, actualizaciones fusionables, sincronización y acumulación de error | Trayectoria analítica/modal en casos pequeños, error temporal y deriva de energía; mismo dt, pasos y condiciones iniciales |
+| Dense network, implemented | Two-layer inference with tanh and one SGD step with explicit gradients, in `examples/dense_network.py` | Rectangular GEMM, bias/broadcasting, activations, transposes, and temporaries | All gradients against finite differences in a small case; prediction, loss, gradient, and parameter errors; same update in all references |
+| Coupled oscillators, implemented | Velocity-Verlet steps in a dense SPD harmonic system, with a reused stiffness matrix | Repeated GEMV, fusible updates, synchronization, and error accumulation | Analytical/modal trajectory for small cases, temporal error, and energy drift; same dt, steps, and initial conditions |
 
-Ambos admiten tamaños impares/rectangulares en sus operandos apropiados y usan
-principalmente operaciones existentes. La simulación densa es un control de
-operaciones densas, no una forma eficiente de representar cualquier física local;
-no densificar un problema disperso para obtener un benchmark favorable.
+Both support odd/rectangular sizes in the appropriate operands and mostly use
+existing operations. Dense simulation is a control for dense operations, not an
+efficient way to represent all local physics; do not densify a sparse problem
+to obtain a favorable benchmark.
 
-Entrenamiento no implica añadir autodiff. Empezar con NumPy directo, OpenCL
-custom/CLBlast, Vulkan y CuPy/CUDA donde sus primitivas lo permitan. PyTorch/JAX
-son controles adicionales si implementan el mismo trabajo y precisión; separar
-compilación/captura y distinguir autodiff de gradientes explícitos. Conservar
-rutas eager/compiladas, errores, fallos, transferencias y memoria máxima.
-La [primera red densa](dense-network-results.md) dispone de ejemplo, pruebas y runner
-independiente; registra bytes pero todavía no instrumenta el pico de memoria.
-La [simulación de osciladores](oscillators-results.md) añade un recorrido de pasos
-fijos, con un único paso compilado reutilizado. Separa diferencias de backend,
-error temporal modal y energía; tampoco mide todavía el pico de memoria.
+Training does not imply adding autodiff. Start with direct NumPy, OpenCL
+custom/CLBlast, Vulkan, and CuPy/CUDA where their primitives allow it. PyTorch/JAX
+are additional controls if they implement the same work and precision; separate
+compilation/capture and distinguish autodiff from explicit gradients. Retain
+eager/compiled paths, errors, failures, transfers, and peak memory.
+The [first dense network](dense-network-results.md) has an example, tests, and an
+independent runner; it records bytes but does not yet instrument peak memory.
+The [oscillator simulation](oscillators-results.md) adds a fixed-step run with a
+single reused compiled step. It separates backend differences, modal temporal
+error, and energy; it also does not yet measure peak memory.
 
-## Próximas cargas y decisiones que deben justificar
+## Next workloads and the decisions they must justify
 
-1. **Distancias por bloques para búsqueda de vecinos/clustering.** Comparar
-   diferencias fusionadas contra identidad de Gram, incluyendo cancelación al
-   restar términos grandes. Medir pico de memoria y coste de bloques; un método
-   más rápido que pierde distancias pequeñas no cumple el mismo objetivo.
-2. **Transformaciones por lotes.** Muchas matrices pequeñas con broadcasting,
-   tamaños irregulares y diferentes cantidades de lotes. Separar despacho por
-   matriz de batched real; no descartar el workload porque cada matriz sea pequeña.
-3. **Solvers en matrices densas variadas.** Familias SPD generadas con espectro
-   controlado, matrices de Gram regularizadas y varios RHS. Medir hasta tolerancia,
-   iteraciones, error de solución, residuo y memoria; no inferirlo de veinte pasos.
-4. **Pipelines reutilizados.** Centrado/normalización, covarianza y proyecciones con
-   factores ya disponibles. Evaluar `mean`, transpose, GEMM y temporales antes de
-   añadir una factorización nueva. No anunciar PCA completo sin eigensolver.
+1. **Blocked distances for neighbor search/clustering.** Compare fused
+   differences against the Gram identity, including cancellation when subtracting
+   large terms. Measure peak memory and blocking cost; a faster method that
+   loses small distances does not meet the same objective.
+2. **Batched transformations.** Many small matrices with broadcasting, irregular
+   sizes, and different batch counts. Separate per-matrix dispatch from true
+   batching; do not discard the workload because each matrix is small.
+3. **Solvers on varied dense matrices.** SPD families generated with controlled
+   spectra, regularized Gram matrices, and multiple RHSs. Measure time to
+   tolerance, iterations, solution error, residual, and memory; do not infer
+   these from twenty steps.
+4. **Reused pipelines.** Centering/normalization, covariance, and projections
+   with factors already available. Evaluate `mean`, transpose, GEMM, and
+   temporaries before adding a new factorization. Do not advertise complete
+   PCA without an eigensolver.
 
-La elección de nuevas funciones debe seguir a estos casos. `maximum`/clipping,
-reducciones eficientes por eje y matmul con operandos transpuestos pueden aportar
-más valor inmediato que ampliar la superficie de NumPy indiscriminadamente.
+New function selection should follow these cases. `maximum`/clipping, efficient
+axis reductions, and matmul with transposed operands may offer more immediate
+value than indiscriminately expanding the NumPy surface.
 
-## Protocolo para decidir prioridades
+## Protocol for deciding priorities
 
-- Separar problema pequeño, datos que caben en caché y matrices mayores que la
-  caché; registrar bytes y memoria máxima junto a tiempo y error.
-- Comparar mismo dtype, inputs, algoritmo, número de pasos o criterio de parada.
-  Tratar una mejora algorítmica como una comparación adicional identificada.
-- Publicar mediana y dispersión, primera ejecución y coste de preparación;
-  intercalar implementaciones y conservar casos mixtos o fallidos.
-- Medir timestamps GPU y tasas de copia/cálculo sostenidas para construir un
-  modelo de límites por carga. No llamar límite físico a la velocidad de CuPy.
-- Cuando un caso aplicado revele una regresión, aislar su operación dominante
-  antes de cambiar kernels o selección de proveedor.
+- Separate small problems, cache-resident data, and matrices larger than cache;
+  record bytes and peak memory alongside time and error.
+- Compare the same dtype, inputs, algorithm, and step count or stopping criterion.
+  Treat an algorithmic improvement as an additional, identified comparison.
+- Publish median and dispersion, first execution, and preparation cost;
+  interleave implementations and retain mixed or failed cases.
+- Measure GPU timestamps and sustained copy/compute rates to build a per-workload
+  limits model. Do not call CuPy's speed a physical limit.
+- When an application case reveals a regression, isolate its dominant operation
+  before changing kernels or provider selection.
 
-Los resultados de esta etapa se recogen en
-[solvers, aplicaciones y preparación CUDA](solver-applications-results.md).
+Results from this stage are collected in
+[solvers, applications, and CUDA preparation](solver-applications-results.md).

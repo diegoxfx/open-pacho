@@ -1,4 +1,4 @@
-"""Generate transparent CSV summaries, static charts and a Spanish report from raw data."""
+"""Generate transparent CSV summaries, static charts and an English report from raw data."""
 
 import argparse
 import csv
@@ -116,13 +116,13 @@ def plot_matmul(rows, output):
             ax.set_yscale("log")
             ax.grid(alpha=0.2)
             ax.set_title(
-                f"{dtype} · {'datos residentes' if mode == 'resident' else 'incluye subida y descarga'}"
+                f"{dtype} · {'resident data' if mode == 'resident' else 'includes upload and download'}"
             )
-            ax.set_ylabel("Tiempo NumPy / tiempo GPU")
-            ax.set_xlabel("Lado de la matriz cuadrada")
+            ax.set_ylabel("NumPy time / GPU time")
+            ax.set_xlabel("Square matrix side length")
     axes[0, 0].legend(frameon=False)
     fig.suptitle(
-        "Producto matricial: más de 1× significa que gana GPU\nBaseline: NumPy más rápido medido entre 1, 8 y 16 hilos",
+        "Matrix multiplication: above 1× means the GPU wins\nBaseline: fastest NumPy measured across 1, 8, and 16 threads",
         fontsize=13,
     )
     fig.tight_layout()
@@ -135,10 +135,10 @@ def plot_workloads(rows, output):
         axes.flat,
         ("add", "transcendental", "distance", "reuse"),
         (
-            "Suma: poco cálculo por byte",
-            "sin / exp / cos: más cálculo",
-            "Distancia: salida escalar",
-            "100 pasos, una subida y descarga",
+            "Addition: little computation per byte",
+            "sin / exp / cos: more computation",
+            "Distance: scalar output",
+            "100 steps, one upload and download",
         ),
     ):
         for backend, label in LABELS.items():
@@ -165,11 +165,11 @@ def plot_workloads(rows, output):
         ax.set_xscale("log", base=2)
         ax.set_yscale("log")
         ax.grid(alpha=0.2)
-        ax.set_xlabel("Número de elementos")
-        ax.set_ylabel("Tiempo NumPy / tiempo GPU")
+        ax.set_xlabel("Number of elements")
+        ax.set_ylabel("NumPy time / GPU time")
         ax.set_title(title)
     axes[0, 0].legend(frameon=False)
-    fig.suptitle("Coste completo con transferencias · float32", fontsize=14)
+    fig.suptitle("End-to-end cost including transfers · float32", fontsize=14)
     fig.tight_layout()
     save_figure(fig, output, "workload-speedup")
 
@@ -190,12 +190,12 @@ def plot_transfers(report, output):
                 label=label,
             )
         ax.set_xscale("log")
-        ax.set_xlabel("Tamaño de la copia (MiB)")
-        ax.set_ylabel("GB/s efectivos")
+        ax.set_xlabel("Copy size (MiB)")
+        ax.set_ylabel("Effective GB/s")
         ax.set_title(title)
         ax.grid(alpha=0.2)
     axes[0].legend(frameon=False)
-    fig.suptitle("Copias con buffers ya asignados y memoria host pageable", fontsize=13)
+    fig.suptitle("Copies with preallocated buffers and pageable host memory", fontsize=13)
     fig.tight_layout()
     save_figure(fig, output, "transfer-bandwidth")
 
@@ -229,16 +229,16 @@ def plot_solvers(rows, output):
             ax.set_yscale("log")
             ax.grid(alpha=0.2)
             name = {
-                "cg": "Gradiente conjugado",
+                "cg": "Conjugate gradient",
                 "jacobi": "Jacobi",
-                "sd": "Descenso por gradiente",
+                "sd": "Gradient descent",
             }[op]
             ax.set_title(f"{name} · {dtype}")
-            ax.set_xlabel("Número de variables")
-            ax.set_ylabel("Tiempo NumPy / tiempo GPU")
+            ax.set_xlabel("Number of variables")
+            ax.set_ylabel("NumPy time / GPU time")
     axes[0, 0].legend(frameon=False)
     fig.suptitle(
-        "Solvers con subida y descarga: el tamaño cambia el resultado\nMisma recurrencia y tolerancia; más de 1× significa que gana GPU",
+        "Solvers including upload and download: size changes the outcome\nSame recurrence and tolerance; above 1× means the GPU wins",
         fontsize=13,
     )
     fig.tight_layout()
@@ -264,27 +264,27 @@ def table_row(case_id, comparisons):
 def build_report(raw, comparisons, output, cold=None):
     metadata = raw["metadata"]
     lines = [
-        "# Benchmarks completos de OpenPacho, NumPy y CUDA",
+        "# Complete OpenPacho, NumPy, and CUDA benchmarks",
         "",
-        "Resultados locales de la implementación existente. No se modificaron kernels para esta comparación.",
+        "Local results for the existing implementation. No kernels were modified for this comparison.",
         "",
-        "## Hipótesis y criterio",
+        "## Hypothesis and criterion",
         "",
         (
-            "La hipótesis sometida a prueba es que OpenPacho no puede ganar a NumPy por el coste de transferencia, ni con CUDA. "
-            "Se separa la afirmación de rendimiento de su explicación causal. CuPy/CUDA es un control independiente con "
-            "kernels, bibliotecas y asignador diferentes; OpenPacho sigue usando OpenCL."
+            "The hypothesis under test is that transfer costs prevent OpenPacho from outperforming NumPy, even with CUDA. "
+            "The performance claim is separated from its causal explanation. CuPy/CUDA is an independent control with "
+            "different kernels, libraries, and allocator; OpenPacho continues to use OpenCL."
         ),
         "",
         (
-            "La referencia de cada configuración es **el NumPy más rápido medido entre 1, 8 y 16 hilos**. "
-            "GPU/CPU no se ejecutaron a la vez. Se compara tiempo de pared sincronizado, con el mismo dtype y resultados validados. "
-            "Un factor mayor que 1 significa que GPU tarda menos."
+            "Each configuration uses **the fastest NumPy measured across 1, 8, and 16 threads** as its reference. "
+            "GPU/CPU did not run concurrently. The comparison uses synchronized wall time, the same dtype, and validated results. "
+            "A ratio above 1 means the GPU takes less time."
         ),
         "",
-        "## Resumen de la cuadrícula",
+        "## Test grid summary",
         "",
-        "| Motor | Escenario | Gana claramente | Pierde claramente | Diferencia pequeña/incierta |",
+        "| Backend | Scenario | Clear wins | Clear losses | Small/uncertain difference |",
         "| --- | --- | ---: | ---: | ---: |",
     ]
     for backend, label in LABELS.items():
@@ -301,20 +301,20 @@ def build_report(raw, comparisons, output, cold=None):
         [
             "",
             (
-                "“Claramente” exige una diferencia mediana de al menos 10% y que el intervalo bootstrap "
-                "descriptivo de 95% no cruce 1. No es una probabilidad de ganar en aplicaciones reales: los recuentos "
-                "dependen de esta cuadrícula de pruebas. El baseline CPU se selecciona con los mismos datos; "
-                "esta selección favorece a CPU y los intervalos no corrigen la selección ni múltiples comparaciones."
+                "A “clear” result requires a median difference of at least 10% and a descriptive 95% bootstrap "
+                "interval that does not cross 1. This is not a probability of winning in real applications: counts "
+                "depend on this test grid. The CPU baseline is selected using the same data; "
+                "this favors the CPU, and intervals do not correct for selection or multiple comparisons."
             ),
             "",
-            "## Ejemplos con coste completo",
+            "## End-to-end cost examples",
             "",
             (
-                "Incluyen subida, cálculo y descarga, con el runtime ya inicializado. Tiempos en milisegundos; "
-                "la segunda cifra es tiempo de NumPy dividido por tiempo de GPU."
+                "Includes upload, computation, and download, with the runtime already initialized. Times are in milliseconds; "
+                "the second value is NumPy time divided by GPU time."
             ),
             "",
-            "| Configuración | NumPy ms (hilos) | OpenPacho ms / factor | CuPy ms / factor |",
+            "| Configuration | NumPy ms (threads) | OpenPacho ms / ratio | CuPy ms / ratio |",
             "| --- | ---: | ---: | ---: |",
         ]
     )
@@ -337,15 +337,15 @@ def build_report(raw, comparisons, output, cold=None):
     lines.extend(
         [
             "",
-            "## Jacobi y descenso por gradiente",
+            "## Jacobi and gradient descent",
             "",
             (
-                "La tabla incluye tiempos residentes. Perder residente no puede atribuirse a subir y "
-                "descargar la matriz completa en cada solución. Sí quedan sincronizaciones y pequeñas "
-                "transferencias de escalares por iteración."
+                "The table includes resident timings. Losing with resident data cannot be attributed to uploading "
+                "and downloading the entire matrix for each solve. Synchronization and small scalar "
+                "transfers at each iteration remain."
             ),
             "",
-            "| Método y tamaño | NumPy ms | OpenCL residente / completo ms | CUDA residente / completo ms |",
+            "| Method and size | NumPy ms | OpenCL resident / end-to-end ms | CUDA resident / end-to-end ms |",
             "| --- | ---: | ---: | ---: |",
         ]
     )
@@ -362,73 +362,73 @@ def build_report(raw, comparisons, output, cold=None):
                 }
                 values.append(f"{modes['resident']:.3f} / {modes['end_to_end']:.3f}")
             lines.append("| " + " | ".join(values) + " |")
-    lines.extend(["", "![Escala de solvers](solver-speedup.png)", ""])
+    lines.extend(["", "![Solver scaling](solver-speedup.png)", ""])
     lines.extend(
         [
             "",
-            "![Producto matricial](matmul-speedup.png)",
+            "![Matrix multiplication](matmul-speedup.png)",
             "",
-            "![Distintas cargas](workload-speedup.png)",
+            "![Different workloads](workload-speedup.png)",
             "",
-            "## Separar coste de transferencia y coste de ejecución",
+            "## Separate transfer costs from execution costs",
             "",
             (
-                "`resident` conserva los arrays grandes en GPU. Incluye despacho Python, temporales, asignación/liberación "
-                "y sincronización. OpenPacho también sube operandos escalares: el ensayo de 100 pasos incluye "
-                "200 pequeñas subidas escalares. No es tiempo exclusivo del kernel."
+                "`resident` keeps large arrays on the GPU. It includes Python dispatch, temporaries, allocation/deallocation, "
+                "and synchronization. OpenPacho also uploads scalar operands: the 100-step run includes "
+                "200 small scalar uploads. This is not kernel-only time."
             ),
             "",
             (
-                "`upload` y `download` miden las APIs completas por separado. El upload de OpenPacho incluye una copia "
-                "contigua de host y creación del buffer. La prueba de transporte usa buffers existentes y no mide lo mismo. "
-                "No se asume que sumar medianas de fases reconstruya exactamente la mediana end-to-end."
+                "`upload` and `download` measure the complete APIs separately. OpenPacho upload includes a contiguous "
+                "host copy and buffer creation. The transport test uses existing buffers and measures something different. "
+                "Summing phase medians is not assumed to reconstruct the end-to-end median exactly."
             ),
             "",
             (
-                "CuPy conserva su pool de memoria predeterminado; OpenPacho crea buffers OpenCL nuevos. Las diferencias "
-                "son parte del coste de usar las librerías actuales, no una prueba de inferioridad del estándar OpenCL."
+                "CuPy retains its default memory pool; OpenPacho creates new OpenCL buffers. These differences "
+                "are part of the cost of using the current libraries, not proof that the OpenCL standard is inferior."
             ),
             "",
-            "![Ancho de banda de copias](transfer-bandwidth.png)",
+            "![Copy bandwidth](transfer-bandwidth.png)",
             "",
-            "## Condiciones y reproducibilidad",
+            "## Conditions and reproducibility",
             "",
-            f"- Sistema: `{metadata['platform']}`; Python `{metadata['python']}`.",
-            f"- CPU: `{metadata['processor']}`; {metadata['logical_cpus']} procesadores lógicos. Se controló BLAS con threadpoolctl.",
-            f"- GPU OpenCL: `{metadata.get('selected_opencl_device', 'no seleccionado')}`.",
+            f"- System: `{metadata['platform']}`; Python `{metadata['python']}`.",
+            f"- CPU: `{metadata['processor']}`; {metadata['logical_cpus']} logical processors. BLAS was controlled with threadpoolctl.",
+            f"- OpenCL GPU: `{metadata.get('selected_opencl_device', 'not selected')}`.",
             f"- GPU CUDA: `{metadata.get('cuda_device', {})}`.",
-            f"- Versiones: `{metadata['versions']}`.",
+            f"- Versions: `{metadata['versions']}`.",
             f"- Runtime CUDA: `{metadata.get('cuda_runtime')}`; TF32 override: `{metadata.get('cuda_tf32_override')}`.",
-            f"- Configuraciones: {len(metadata['case_order'])}; filas crudas: {len(raw['rows'])}; errores: {len(raw['errors'])}.",
+            f"- Configurations: {len(metadata['case_order'])}; raw rows: {len(raw['rows'])}; errors: {len(raw['errors'])}.",
             (
-                f"- Rondas por fila: {sorted({len(r['samples_s']) for r in raw['rows']})}; bloques adaptativos hasta {metadata['arguments']['max_batch']} llamadas. "
-                "Se sincroniza cada llamada, incluso dentro del bloque; cada muestra es su tiempo medio."
+                f"- Rounds per row: {sorted({len(r['samples_s']) for r in raw['rows']})}; adaptive blocks of up to {metadata['arguments']['max_batch']} calls. "
+                "Each call is synchronized, even within a block; each sample is its mean time."
             ),
-            "- Orden de configuraciones y filas aleatorizado con semilla registrada; validación fuera del reloj.",
+            "- Configuration and row order randomized with a recorded seed; validation outside the clock.",
             (
-                "- Transporte: orden fijo ascendente de tamaños, OpenCL seguido de CUDA; útil como diagnóstico, "
-                "sin atribuir significación estadística a pequeñas diferencias de ancho de banda."
+                "- Transport: fixed ascending size order, OpenCL followed by CUDA; useful as a diagnostic, "
+                "without attributing statistical significance to small bandwidth differences."
             ),
-            f"- Fuentes sin cambios durante el ensayo: `{metadata['source_unchanged']}`; hashes en raw.json.",
-            f"- Duración de la suite: {metadata['elapsed_s']:.1f} s; telemetría GPU al inicio, durante y al final en raw.json.",
+            f"- Sources unchanged during the run: `{metadata['source_unchanged']}`; hashes in raw.json.",
+            f"- Suite duration: {metadata['elapsed_s']:.1f} s; GPU telemetry before, during, and after the run in raw.json.",
             "",
             (
-                "Casos: suma, reducción, funciones trascendentes, distancia, secuencias de 1/10/100 pasos, "
-                "matmul cuadrado/rectangular, matvec, transposición materializada y los tres solvers. "
-                "Float32 y float64 se comparan por separado. El máximo vector tiene 16.777.216 elementos; "
-                "matmul llega a 2048² y matvec/transposición a 4096². La extensión de solvers llega a 8192 variables "
-                "(512 MiB por matriz float64) con 7 rondas y una llamada por muestra."
+                "Cases: addition, reduction, transcendental functions, distance, 1/10/100-step sequences, "
+                "square/rectangular matmul, matvec, materialized transpose, and the three solvers. "
+                "Float32 and float64 are compared separately. The largest vector has 16,777,216 elements; "
+                "matmul reaches 2048² and matvec/transpose 4096². The solver extension reaches 8192 variables "
+                "(512 MiB per float64 matrix) with 7 rounds and one call per sample."
             ),
             "",
             (
-                "Los solvers usan la misma recurrencia, verificaciones de finitud y criterio de residuo real. "
-                "La matriz SPD tiene diagonal 2.5 y sub/superdiagonal -1, almacenada en formato denso. "
-                "No representa todos los condicionamientos ni problemas dispersos. Iteraciones y residuos se guardan "
-                "en las filas de solvers GPU residentes; las filas end-to-end también validan el resultado. "
-                "NumPy es un solver iterativo equivalente, no solve directo cronometrado."
+                "Solvers use the same recurrence, finiteness checks, and true-residual criterion. "
+                "The SPD matrix has diagonal 2.5 and sub/superdiagonal -1, stored densely. "
+                "It does not represent all condition numbers or sparse problems. Iterations and residuals are saved "
+                "in resident GPU solver rows; end-to-end rows also validate the result. "
+                "NumPy uses an equivalent iterative solver, not a timed direct solve."
             ),
             "",
-            "## Inicialización y primera llamada",
+            "## Initialization and first call",
             "",
         ]
     )
@@ -436,12 +436,12 @@ def build_report(raw, comparisons, output, cold=None):
         lines.extend(
             [
                 (
-                    "Procesos nuevos; caché CuPy existente conservada y caché de disco OpenCL deshabilitada en este ensayo. La métrica suma imports/inicialización "
-                    "y el primer matmul con transferencias; excluye generación de inputs y validación. "
-                    "Son tres repeticiones y no deben interpretarse como tiempos estables de arranque del sistema."
+                    "Fresh processes; the existing CuPy cache is retained and the OpenCL disk cache is disabled in this run. The metric sums imports/initialization "
+                    "and the first matmul including transfers; it excludes input generation and validation. "
+                    "These are three repetitions and should not be interpreted as stable system startup times."
                 ),
                 "",
-                "| Motor | dtype | Inicialización mediana ms | Primera operación ms | Suma mediana ms |",
+                "| Backend | dtype | Median initialization ms | First operation ms | Median sum ms |",
                 "| --- | --- | ---: | ---: | ---: |",
             ]
         )
@@ -454,23 +454,23 @@ def build_report(raw, comparisons, output, cold=None):
                 )
     else:
         lines.append(
-            "El primer uso dentro de la suite está registrado en first_call_s; no equivale a proceso frío."
+            "First use within the suite is recorded in first_call_s; it is not equivalent to a cold process."
         )
     lines.extend(
         [
             "",
-            "## Archivos",
+            "## Files",
             "",
-            "- `raw.json`: todas las muestras, metadatos, validaciones, hashes y errores.",
-            "- `comparisons.csv`: cada GPU/escenario frente a la mejor configuración NumPy medida.",
-            "- `timings.csv`: medianas, dispersión, bytes y fases de todas las filas.",
-            "- Figuras PNG y SVG: resultados exportables.",
+            "- `raw.json`: every sample, metadata, validation, hashes, and errors.",
+            "- `comparisons.csv`: each GPU/scenario against the best measured NumPy configuration.",
+            "- `timings.csv`: medians, dispersion, bytes, and phases for every row.",
+            "- PNG and SVG figures: exportable results.",
             "",
             (
-                "El resultado solo describe este equipo, este código y estas entradas. No demuestra que todas las "
-                "GPUs ganen ni que CUDA sea intrínsecamente superior a OpenCL. Para el diseño de temporización se consultó "
-                "[la documentación oficial de CuPy](https://docs.cupy.dev/en/stable/user_guide/performance.html), "
-                "especialmente sincronización, primera llamada y asignación de memoria."
+                "The result describes only this machine, this code, and these inputs. It does not prove that every "
+                "GPU wins or that CUDA is intrinsically superior to OpenCL. Timing design drew on "
+                "[the official CuPy documentation](https://docs.cupy.dev/en/stable/user_guide/performance.html), "
+                "particularly synchronization, first calls, and memory allocation."
             ),
             "",
         ]

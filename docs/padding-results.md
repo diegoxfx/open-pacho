@@ -1,119 +1,119 @@
-# Padding opcional: resultados locales — 2026-09-18
+# Optional padding: local results — 2026-09-18
 
-**Snapshot histórico.** La [inspección posterior](kernel-inspection-results.md)
-detectó y corrigió conversiones float64 innecesarias en la ruta OpenCL sin
-padding. Con la base corregida, la ventaja del padding en el caso grande irregular
-no se mantiene. Las mediciones siguientes conservan la versión anterior.
-La [reevaluación actual](padding-reassessment.md) amplía las formas sobre la base
-corregida y conserva la opción por ganancias concretas en productos rectangulares.
+**Historical snapshot.** The [subsequent inspection](kernel-inspection-results.md)
+detected and fixed unnecessary float64 conversions on the OpenCL path without
+padding. With the corrected baseline, the padding advantage in the large irregular
+case does not persist. The measurements below preserve the previous version.
+The [current reassessment](padding-reassessment.md) expands the shapes on the corrected
+baseline and retains the option for specific gains on rectangular products.
 
-El padding aporta una mejora reproducida en los dos GEMM grandes irregulares de
-**OpenCL custom**. En las formas medidas de Vulkan y CUDA custom, las copias
-adicionales no producen una mejora general. Se mantiene desactivado por defecto.
-El [contrato](padding.md) permite elegirlo sin cambiar dimensiones lógicas,
-precisión ni proveedor BLAS.
+Padding provides an improvement reproduced in both large irregular GEMMs on
+**OpenCL custom**. On the measured Vulkan and CUDA custom shapes, the additional
+copies do not produce a general improvement. It remains disabled by default.
+The [contract](padding.md) allows selecting it without changing logical dimensions,
+accuracy or BLAS provider.
 
-## Método y alcance
+## Method and scope
 
-Windows, Python 3.12, RTX 5060 Ti, driver 616.64; un solo fabricante/dispositivo.
-`benchmarks.padding` ejecutó seis formas float32, incluidas rectangular, impar,
-alineada y broadcasting `(2,1,65,47) @ (1,3,47,67)`. Dos rondas con semillas 941
-y 942, procesos separados, orden invertido de backends y 21 muestras por variante
-y ámbito. Dentro de cada caso se alternan `padding=False` y `True` con los mismos
-datos; la preparación y el calentamiento quedan fuera de los relojes repetidos.
-La primera ejecución registrada puede incluir compilación de kernels; el plan
-Python ya se ha preparado. No mide instalación ni importación inicial.
+Windows, Python 3.12, RTX 5060 Ti, driver 616.64; a single vendor/device.
+`benchmarks.padding` ran six float32 shapes, including rectangular, odd,
+aligned and broadcasting `(2,1,65,47) @ (1,3,47,67)`. Two rounds with seeds 941
+and 942, separate processes, reversed backend order and 21 samples per variant
+and scope. Within each case, `padding=False` and `True` alternate with the same
+data; preparation and warmup are outside the repeated clocks.
+The recorded first execution may include kernel compilation; the Python plan
+has already been prepared. It does not measure installation or initial imports.
 
-Los seis controles previos observaron inactividad GPU/memoria ≤5%, tres lecturas
-consecutivas, al menos 10 s de pausa, temperatura ≤52 °C y dentro del margen
-relativo configurado. Las esperas efectivas fueron **10,5–156,4 s**; no se relajó
-el control para completar la sesión. Las temperaturas medias de las ventanas
-finales estuvieron entre 41 y 49 °C. Esto limita interferencias entre procesos;
-no garantiza frecuencia constante, aislamiento del sistema ni equilibrio térmico.
-Hay variación visible entre rondas, especialmente en algunas llamadas pequeñas.
+All six preflight controls observed GPU/memory inactivity ≤5%, three consecutive
+readings, at least a 10 s pause, temperature ≤52 °C and within the configured
+relative margin. Actual waits were **10.5–156.4 s**; the control was not relaxed
+to complete the session. Mean temperatures in the final windows were
+between 41 and 49 °C. This limits interference between processes;
+it does not guarantee constant frequency, system isolation or thermal equilibrium.
+Variation between rounds is visible, especially in some small calls.
 
-Se guardaron **6 048 muestras públicas**: ejecución compilada residente,
-ejecutor preparado, `matmul` directo y recorrido completo con subida/descarga.
-Todas incluyen las copias de padding y recorte. Otras **756 muestras** corresponden
-al diagnóstico `prepacked_wall`: entradas ya rellenadas, salida física sin
-recortar. Este diagnóstico excluye costes necesarios de la API y no es tiempo
-puro de GPU: incluye despacho, asignación y sincronización.
+**6,048 public samples** were saved: resident compiled execution,
+prepared executor, direct `matmul` and the complete path with upload/download.
+All include padding and cropping copies. Another **756 samples** correspond
+to the `prepacked_wall` diagnostic: already padded inputs and an uncropped
+physical output. This diagnostic excludes necessary API costs and is not pure
+GPU time: it includes dispatch, allocation and synchronization.
 
-## Ejecución compilada residente
+## Resident compiled execution
 
-Cada intervalo abarca las medianas de las dos rondas, **no** un intervalo de
-confianza. La aceleración es `tiempo_sin / tiempo_con`, calculada por ronda;
-valores menores de uno indican una regresión al activar padding.
+Each range spans the medians of the two rounds, **not** a confidence
+interval. Speedup is `time_without / time_with`, calculated per round;
+values below one indicate a regression when padding is enabled.
 
-| Backend | M,K,N / lote | Sin padding (ms) | Con padding (ms) | Aceleración por ronda |
+| Backend | M,K,N / batch | Without padding (ms) | With padding (ms) | Speedup per round |
 | --- | --- | ---: | ---: | ---: |
-| OpenCL | 33,17,65 | 0,055–0,057 | 0,132–0,139 | 0,41–0,42× |
-| OpenCL | 257,255,259 | 0,093–0,096 | 0,133–0,158 | 0,61–0,70× |
-| OpenCL | 1025,1023,1027 | 0,845–0,874 | 0,597–0,647 | **1,35–1,42×** |
-| OpenCL | 2049,2047,2051 | 6,002–6,503 | 3,760–4,237 | **1,53–1,60×** |
-| OpenCL | 1024,1024,1024 | 0,505–0,541 | 0,496–0,542 | 1,00–1,02× |
-| OpenCL | lote 2×3: 65,47,67 | 0,059–0,082 | 0,142–0,217 | 0,38–0,42× |
-| Vulkan | 33,17,65 | 0,141–0,172 | 0,231–0,270 | 0,61–0,64× |
-| Vulkan | 257,255,259 | 0,178–0,179 | 0,272–0,283 | 0,63–0,66× |
-| Vulkan | 1025,1023,1027 | 0,535–0,541 | 0,671–0,683 | 0,79–0,80× |
-| Vulkan | 2049,2047,2051 | 2,826–2,992 | 3,317–3,319 | 0,85–0,90× |
-| Vulkan | 1024,1024,1024 | 0,494–0,503 | 0,485–0,503 | 1,00–1,02× |
-| Vulkan | lote 2×3: 65,47,67 | 0,168–0,171 | 0,266–0,269 | 0,63–0,63× |
-| CUDA custom | 33,17,65 | 0,075–0,076 | 0,216–0,221 | 0,34–0,35× |
-| CUDA custom | 257,255,259 | 0,098–0,151 | 0,215–0,462 | 0,33–0,46× |
-| CUDA custom | 1025,1023,1027 | 0,529–0,546 | 0,616–0,688 | 0,79–0,86× |
-| CUDA custom | 2049,2047,2051 | 3,700–3,720 | 3,689–3,713 | 1,00–1,01× |
-| CUDA custom | 1024,1024,1024 | 0,470–0,470 | 0,461–0,466 | 1,01–1,02× |
-| CUDA custom | lote 2×3: 65,47,67 | 0,083–0,107 | 0,215–0,306 | 0,35–0,38× |
+| OpenCL | 33,17,65 | 0.055–0.057 | 0.132–0.139 | 0.41–0.42× |
+| OpenCL | 257,255,259 | 0.093–0.096 | 0.133–0.158 | 0.61–0.70× |
+| OpenCL | 1025,1023,1027 | 0.845–0.874 | 0.597–0.647 | **1.35–1.42×** |
+| OpenCL | 2049,2047,2051 | 6.002–6.503 | 3.760–4.237 | **1.53–1.60×** |
+| OpenCL | 1024,1024,1024 | 0.505–0.541 | 0.496–0.542 | 1.00–1.02× |
+| OpenCL | batch 2×3: 65,47,67 | 0.059–0.082 | 0.142–0.217 | 0.38–0.42× |
+| Vulkan | 33,17,65 | 0.141–0.172 | 0.231–0.270 | 0.61–0.64× |
+| Vulkan | 257,255,259 | 0.178–0.179 | 0.272–0.283 | 0.63–0.66× |
+| Vulkan | 1025,1023,1027 | 0.535–0.541 | 0.671–0.683 | 0.79–0.80× |
+| Vulkan | 2049,2047,2051 | 2.826–2.992 | 3.317–3.319 | 0.85–0.90× |
+| Vulkan | 1024,1024,1024 | 0.494–0.503 | 0.485–0.503 | 1.00–1.02× |
+| Vulkan | batch 2×3: 65,47,67 | 0.168–0.171 | 0.266–0.269 | 0.63–0.63× |
+| CUDA custom | 33,17,65 | 0.075–0.076 | 0.216–0.221 | 0.34–0.35× |
+| CUDA custom | 257,255,259 | 0.098–0.151 | 0.215–0.462 | 0.33–0.46× |
+| CUDA custom | 1025,1023,1027 | 0.529–0.546 | 0.616–0.688 | 0.79–0.86× |
+| CUDA custom | 2049,2047,2051 | 3.700–3.720 | 3.689–3.713 | 1.00–1.01× |
+| CUDA custom | 1024,1024,1024 | 0.470–0.470 | 0.461–0.466 | 1.01–1.02× |
+| CUDA custom | batch 2×3: 65,47,67 | 0.083–0.107 | 0.215–0.306 | 0.35–0.38× |
 
-El control alineado no asigna buffers privados ni hace copias adicionales. Sus
-diferencias pequeñas no se consideran una ganancia robusta. Tampoco se interpreta
-la diferencia marginal de CUDA en 2049 como una mejora demostrada.
+The aligned control does not allocate private buffers or make additional copies.
+Its small differences are not considered a robust gain. The marginal CUDA
+difference at 2049 is not interpreted as a demonstrated improvement either.
 
-## Coste completo y memoria
+## Complete cost and memory
 
-En OpenCL, el caso 2049×2047×2051 sigue ganando con transferencias:
-**14,51–14,69 ms → 11,95–12,79 ms**, aceleración de **1,15–1,21×** por ronda.
-Solicita **51 384 320 bytes privados (49,00 MiB)**, además de entradas y salida
-lógica. El caso 1025×1023×1027 solicita 12,50 MiB y pasa de 3,14–3,31 ms a
-2,93–3,03 ms completos, 1,07–1,09×. El beneficio residente no puede extrapolarse
-sin incluir transferencias.
+On OpenCL, the 2049×2047×2051 case still wins with transfers:
+**14.51–14.69 ms → 11.95–12.79 ms**, a speedup of **1.15–1.21×** per round.
+It requests **51,384,320 private bytes (49.00 MiB)** in addition to inputs and
+the logical output. The 1025×1023×1027 case requests 12.50 MiB and goes from
+3.14–3.31 ms to 2.93–3.03 ms complete, 1.07–1.09×. The resident benefit cannot
+be extrapolated without including transfers.
 
-El diagnóstico OpenCL preempaquetado de 2049 toma 3,52–3,89 ms, frente a
-3,76–4,24 ms del camino público residente con todas las copias. En Vulkan toma
-2,80–2,84 ms y el camino público 3,32 ms; la ruta ordinaria ya tarda 2,83–2,99 ms.
-Estos datos orientan hacia reducir copias y conservar layouts internos en cadenas
-compatibles. No prueban qué instrucciones emitió el compilador ni que todas las
-guardas del código fuente se conviertan en branches de máquina.
+The prepacked OpenCL diagnostic at 2049 takes 3.52–3.89 ms, versus
+3.76–4.24 ms for the public resident path with all copies. On Vulkan it takes
+2.80–2.84 ms and the public path 3.32 ms; the ordinary path already takes 2.83–2.99 ms.
+These data point toward reducing copies and retaining internal layouts across
+compatible chains. They do not prove which instructions the compiler emitted or
+that all source-code guards become machine branches.
 
-## Error numérico y límites
+## Numerical error and limits
 
-En las **36 comparaciones emparejadas**, el resultado con padding coincide
-elemento a elemento exactamente con el obtenido sin padding en el mismo backend.
-Ambos pasan la comparación con una referencia NumPy float64; el mayor error
-relativo L2 observado fue **8,11×10⁻⁷** y el mayor error absoluto **4,02×10⁻⁵**.
-No aparecieron valores no finitos en estos datos aleatorios. La comprobación por
-elemento usa `rtol=5e-5, atol=5e-5`; no es una garantía para matrices arbitrarias.
+In all **36 paired comparisons**, the padded result matches the unpadded
+result exactly element by element on the same backend.
+Both pass comparison against a NumPy float64 reference; the largest observed
+relative L2 error was **8.11×10⁻⁷** and the largest absolute error **4.02×10⁻⁵**.
+No nonfinite values appeared in these random data. The elementwise check uses
+`rtol=5e-5, atol=5e-5`; this is not a guarantee for arbitrary matrices.
 
-Las pruebas específicas añaden NaN/Inf, ceros con signo, subnormales y extremos:
-las copias conservan palabras uint32 bit a bit, los valores añadidos son cero
-positivo exacto y la aritmética se contrasta con la ruta existente del backend.
-También verifican recorte antes de `sum`/`mean`, independencia de resultados,
-reenlace de entradas, lotes, límites de memoria/índices y conservación de BLAS.
-No se cambian flags matemáticos ni se promete identidad binaria entre fabricantes.
+Specific tests add NaN/Inf, signed zeros, subnormals and extrema:
+copies preserve uint32 words bit for bit, added values are exact positive zero
+and arithmetic is checked against the backend's existing path.
+They also verify cropping before `sum`/`mean`, independent results,
+input rebinding, batches, memory/index limits and BLAS preservation.
+Math flags are unchanged and binary identity across vendors is not promised.
 
-## Reproducción y próximos márgenes
+## Reproduction and next opportunities
 
-Comando y requisitos en [padding](padding.md). Las muestras, metadatos de planes,
-hashes de fuentes, telemetría y errores de esta ejecución están en
-`.artifacts/padding/measurements`; el resumen está en
-`.artifacts/padding/summary.json`. Los artefactos privados no se incluyen en el
-wheel. La [verificación](verification.md) registra las suites y el paquete final.
+Command and requirements are in [padding](padding.md). Samples, plan metadata,
+source hashes, telemetry and errors from this run are in
+`.artifacts/padding/measurements`; the summary is in
+`.artifacts/padding/summary.json`. Private artifacts are not included in the
+wheel. [Verification](verification.md) records the suites and final package.
 
-El siguiente margen útil sería amortizar copias conservando padding a través de
-operaciones compatibles, con dimensiones lógicas explícitas y reglas para
-reducciones/no finitos. También se puede evaluar un contrato explícito para
-operandos preempaquetados reutilizables. Esta versión vuelve a copiar los inputs
-actuales en cada llamada: no asume silenciosamente que son inmutables. El
-autotuning por forma/hardware puede explorar después qué casos justifican el
-coste. Los resultados actuales no justifican activarlo globalmente.
+The next useful opportunity would be to amortize copies by preserving padding through
+compatible operations, with explicit logical dimensions and rules for
+reductions/nonfinite values. An explicit contract for reusable prepacked
+operands could also be evaluated. This version copies the current inputs again
+on every call: it does not silently assume they are immutable. Shape/hardware
+autotuning can later explore which cases justify the cost.
+Current results do not justify enabling it globally.

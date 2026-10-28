@@ -1,742 +1,741 @@
-# Verificación local de 0.1.0a1
+# Local verification of 0.1.0a1
 
-## Etapa actual: contracción float64 — 2026-10-22
+## Current stage: float64 contraction — 2026-10-22
 
-El [experimento FMA/separado](fp64-contraction-results.md) completa dos rondas
-CUDA y dos OpenCL: 132 filas, 264 variantes, 1.296 muestras y 5.971 comprobaciones
-de salida aceptadas. Las 44.316 evaluaciones de coordenadas incluyen repeticiones;
-no representan observaciones independientes. Se verifican política de redondeo,
-reproducción del control nativo, destinos envenenados, cachés y limpieza.
+The [FMA/separate experiment](fp64-contraction-results.md) completes two CUDA
+and two OpenCL rounds: 132 rows, 264 variants, 1,296 samples and 5,971 accepted
+output checks. The 44,316 coordinate evaluations include repetitions;
+they do not represent independent observations. Rounding policy,
+native-control reproduction, poisoned destinations, caches and cleanup are verified.
 
-Los 33 archivos del runtime permanecen idénticos; CUDA custom conserva
-`fmad=false` y no se incorpora un selector público. Las mejoras de los kernels
-justifican una comparación futura del flujo de red densa, no una promoción
-automática. Los informes distinguen precisión matemática de equivalencia,
-telemetría ausente de la primera ronda y los intentos fallidos de reposo.
+The 33 runtime files remain identical; CUDA custom retains
+`fmad=false` and no public selector is added. Kernel improvements
+justify a future dense-network flow comparison, not automatic
+promotion. Reports distinguish mathematical accuracy from equivalence,
+missing telemetry in the first round and failed idle attempts.
 
-Pasan las 86 pruebas CPU dirigidas y Ruff check/formato en los seis archivos
-Python nuevos. QA independiente: **APPROVE**, con las 22 entradas reconstruidas,
-2.191 puntos de referencia recalculados mediante redondeo entero y sumas exactas,
-y reconciliación de artefactos, tablas, hashes y condiciones de reposo. No se
-ejecuta la suite completa ni se reconstruye el wheel.
+All 86 targeted CPU tests and Ruff checks/formatting on the six new Python
+files pass. Independent QA: **APPROVE**, with all 22 inputs reconstructed,
+2,191 reference points recalculated using integer rounding and exact sums,
+and reconciliation of artifacts, tables, hashes and idle conditions. The
+full suite is not run and the wheel is not rebuilt.
 
-## Etapa anterior: osciladores acoplados — 2026-10-22
+## Previous stage: coupled oscillators — 2026-10-22
 
-El [cliente velocity-Verlet](oscillators-results.md) reutiliza un paso compilado
-durante un bucle sin observaciones host. Pasan 40 pruebas dirigidas: 21 CPU del
-ejemplo, ocho nativas float32/64 y 11 del benchmark. Se cubren convergencia de
-segundo orden, energía, reversibilidad, 65 GEMV por recorrido, rebinding e inputs
-inmutables. No cambia el runtime ni se ejecuta la suite completa.
+The [velocity-Verlet client](oscillators-results.md) reuses a compiled step
+in a loop without host observations. 40 targeted tests pass: 21 CPU example
+tests, eight native float32/64 tests and 11 benchmark tests. Coverage includes second-order
+convergence, energy, reversibility, 65 GEMVs per trajectory, rebinding and immutable
+inputs. The runtime is unchanged and the full suite is not run.
 
-Catorce procesos completan 156 filas y 3.744 muestras, todas aceptadas. Los
-12 procesos GPU pasan reposo observado. Se separan precisión de backend, error
-temporal modal, energía y costes completos. En los tamaños medidos, NumPy ocho
-hilos supera las rutas GPU; los planes mejoran OpenPacho frente a eager. No se
-infiere un cuello de botella exacto a partir de tiempos de pared.
-QA independiente: **APPROVE**, con 32 pruebas CPU reejecutadas y verificación de
-156 celdas, referencias físicas, hashes y 12 puertas de reposo; runtime intacto.
+Fourteen processes complete 156 rows and 3,744 samples, all accepted. All
+12 GPU processes pass observed idle gates. Backend accuracy, modal temporal
+error, energy and complete costs are separated. At measured sizes, eight-thread
+NumPy exceeds GPU paths; plans improve OpenPacho compared with eager. An exact
+bottleneck is not inferred from wall times.
+Independent QA: **APPROVE**, with 32 CPU tests rerun and verification of
+156 cells, physical references, hashes and 12 idle gates; runtime intact.
 
-## Etapa anterior: experimento CUDA GEMM float64 — 2026-10-22
+## Previous stage: CUDA float64 GEMM experiment — 2026-10-22
 
-El [diagnóstico y candidato](cuda-fp64-gemm-results.md) no modifican el runtime.
-GEMM concentra 91.2–95.3% de los eventos GPU registrados en cuatro planes; el
-tile compartido conserva los resultados, pero no mejora consistentemente los
-flujos. Se decide no promoverlo. Dos rondas completan 60 casos, 8.640 muestras y
-9.360 comprobaciones aceptadas. La validación adicional cubre 54 lanzamientos
-con destinos envenenados y nueve rutas de vectores/vacíos/K=0.
+The [diagnostic and candidate](cuda-fp64-gemm-results.md) do not modify the runtime.
+GEMM accounts for 91.2–95.3% of recorded GPU events in four plans; the
+shared tile preserves results but does not consistently improve
+flows. The decision is not to promote it. Two rounds complete 60 cases, 8,640 samples and
+9,360 accepted checks. Additional validation covers 54 launches
+with poisoned destinations and nine vector/empty/K=0 paths.
 
-Pasan 26 pruebas CPU dirigidas del generador y del protocolo. Los casos numéricos
-exactos separan equivalencia de precisión. No se ejecuta la suite completa.
-QA independiente: **APPROVE**, con las 26 pruebas CPU reejecutadas, reconciliación
-de tablas/muestras, 23 controles reproducidos y 172 puntos exactos comprobados.
-Los 33 archivos del runtime permanecen idénticos al estado anterior.
+26 targeted CPU tests of the generator and protocol pass. Exact numerical
+cases separate equivalence from accuracy. The full suite is not run.
+Independent QA: **APPROVE**, with all 26 CPU tests rerun, table/sample
+reconciliation, 23 reproduced controls and 172 exact points checked.
+The 33 runtime files remain identical to the previous state.
 
-## Etapa anterior: red densa como cliente — 2026-10-22
+## Previous stage: dense network as a client — 2026-10-22
 
-El [ejemplo de red densa](dense-network-results.md) añade inferencia y un paso SGD
-con gradientes explícitos, sin cambios de runtime. Pasan 45 pruebas dirigidas:
-24 del ejemplo en CPU, ocho nativas y 13 del protocolo de benchmark. Se verifica
-la derivada de cada parámetro mediante diferencias finitas y el rebinding compilado.
+The [dense-network example](dense-network-results.md) adds inference and one SGD step
+with explicit gradients, without runtime changes. 45 targeted tests pass:
+24 CPU example tests, eight native tests and 13 benchmark protocol tests. Each
+parameter's derivative is verified by finite differences, as is compiled rebinding.
 
-Dos rondas comparan NumPy 1/8 hilos, OpenCL custom/CLBlast, Vulkan, CUDA
-custom/cuBLAS y CuPy. Se conservan 288 filas aceptadas y 6.912 muestras
-residentes/completas, 24 filas Vulkan float64 no soportadas y los 24 fallos
-iniciales de caché CuPy. Dos procesos CuPy adicionales con caché privada completan
-su comparación. Las limitaciones, variación y costes de preparación/transferencia
-están separados. No se ejecuta la suite completa ni se mide el pico de memoria.
-QA independiente: **APPROVE**, con 37 pruebas CPU reejecutadas y reconciliación
-de las 140 celdas de resultados, 23.328 diagnósticos y las 14 puertas GPU.
+Two rounds compare NumPy 1/8 threads, OpenCL custom/CLBlast, Vulkan, CUDA
+custom/cuBLAS and CuPy. They retain 288 accepted rows and 6,912 resident/complete
+samples, 24 unsupported Vulkan float64 rows and the 24 initial
+CuPy cache failures. Two additional CuPy processes with private caches complete
+their comparison. Limitations, variation and preparation/transfer costs
+are separated. The full suite is not run and peak memory is not measured.
+Independent QA: **APPROVE**, with 37 CPU tests rerun and reconciliation
+of all 140 result cells, 23,328 diagnostics and 14 GPU gates.
 
-## Etapa anterior: preparación de extremos — 2026-10-22
+## Previous stage: extrema preparation — 2026-10-22
 
-La [comparación de planes](extrema-planning-results.md) registra seis procesos,
-66 grupos de casos y 11.880 muestras con dos controles independientes, dos rondas
-y reposo observado. Todas las salidas conservan los bits del control y cumplen la
-referencia. Se promueve min/max float32 materializado en OpenCL/CUDA; las regresiones
-Vulkan impiden promoverlo allí. No se generalizan ganancias pequeñas o dtypes no medidos.
+The [plan comparison](extrema-planning-results.md) records six processes,
+66 case groups and 11,880 samples with two independent controls, two rounds
+and observed idle time. All outputs preserve control bits and meet the
+reference. Materialized float32 min/max is promoted on OpenCL/CUDA; Vulkan
+regressions prevent promotion there. Small gains or unmeasured dtypes are not generalized.
 
-Pasan 106 pruebas dirigidas y se omiten cuatro por enteros CUDA no soportados.
-Se cubren extremos, fronteras de productores, rebinding, retención de arrays,
-extensiones de lowerer y el protocolo del benchmark; no se ejecuta la suite global.
-La comprobación posterior a la promoción conserva 1.188 muestras adicionales con
-controles forzados. QA independiente: **APPROVE**, incluidas 45 pruebas CPU y
-reconciliación de las mediciones, tablas y hashes.
+106 targeted tests pass and four are skipped for unsupported CUDA integers.
+Coverage includes extrema, producer boundaries, rebinding, array retention,
+lowerer extensions and the benchmark protocol; the full suite is not run.
+The post-promotion check retains 1,188 additional samples with
+forced controls. Independent QA: **APPROVE**, including 45 CPU tests and
+reconciliation of measurements, tables and hashes.
 
-## Etapa anterior: extremos residentes — 2026-10-22
+## Previous stage: resident extrema — 2026-10-22
 
-La [iteración de min/max](extrema-results.md) añade extremos por ejes en todos
-los backends y en compile, con dtype preservado y reglas de NaN/cero explícitas.
-Softmax/logsumexp permanecen como ejemplos externos. Pasan 267 pruebas dirigidas;
-cuatro se omiten por los enteros no admitidos en CUDA. QA independiente aprobado.
-No se ejecutó la suite
-global ni se afirma una aceleración sin medición.
+The [min/max iteration](extrema-results.md) adds extrema along axes on all
+backends and in compile, with preserved dtype and explicit NaN/zero rules.
+Softmax/logsumexp remain external examples. 267 targeted tests pass;
+four are skipped for unsupported CUDA integers. Independent QA approved.
+The full suite
+was not run and no acceleration is claimed without measurement.
 
-## Etapa anterior: investigación de acumulación GEMM — 2026-10-22
+## Previous stage: GEMM accumulation investigation — 2026-10-22
 
-La [comparación de acumuladores](gemm-accumulation-results.md) añade infraestructura
-experimental, sin cambiar el runtime: seis procesos aislados, 78 grupos de casos,
-468 resultados de variante y 4.320 muestras residentes. Neumaier pasa los casos
-de cancelación severa con coste alto; las variantes por bloques mejoran los casos
-aleatorios, pero conservan pérdidas por cancelación. No se promueve un candidato.
-54 pruebas CPU y Ruff pasan; QA independiente aprobado. Ver protocolo, límites
-y evidencia en el informe.
+The [accumulator comparison](gemm-accumulation-results.md) adds experimental
+infrastructure without changing the runtime: six isolated processes, 78 case groups,
+468 variant results and 4,320 resident samples. Neumaier passes severe
+cancellation cases at high cost; blocked variants improve random
+cases but retain cancellation losses. No candidate is promoted.
+54 CPU tests and Ruff pass; independent QA approved. See protocol, limits
+and evidence in the report.
 
-## Etapa anterior: selección residente — 2026-10-22
+## Previous stage: resident selection — 2026-10-22
 
-La [iteración de where](selection-results.md) añade selección con broadcasting,
-promoción de escalares NumPy 2 y fusión/map-reduce en todos los backends.
-44 pruebas nuevas y 53 regresiones dirigidas pasan; una prueba de int64 se omite
-en CUDA por su alcance explícito. QA independiente aprobado. No se ejecutó
-la suite global ni se afirma una aceleración sin medición.
+The [where iteration](selection-results.md) adds selection with broadcasting,
+NumPy 2 scalar promotion and fusion/map-reduce on every backend.
+44 new tests and 53 targeted regressions pass; one int64 test is skipped
+on CUDA because of its explicit scope. Independent QA approved. The full
+suite was not run and no acceleration is claimed without measurement.
 
-## Etapa anterior: normas estables CUDA — 2026-10-22
+## Previous stage: stable CUDA norms — 2026-10-22
 
-La [iteración de normas](cuda-norm-results.md) comparte el algoritmo escalado
-con CUDA, en eager y compile, y permite ejecutar los solvers externos sin
-cambiar sus recurrencias ni tolerancias.
+The [norm iteration](cuda-norm-results.md) shares the scaled algorithm
+with CUDA, in eager and compile, and enables external solvers without
+changing their recurrences or tolerances.
 
-- **257 pruebas dirigidas pasan**, con OpenCL/Vulkan/CUDA obligatorios;
-  51 avisos PyOpenCL. Ruff check y formato pasan en los ocho archivos Python
-  modificados. No se ejecutó la suite global ni se reconstruyó el wheel.
-- **52 diagnósticos Decimal80** de normas/solvers entre CUDA custom y cuBLAS,
-  sin excepciones; seis alertas hacia la solución en sistemas de Hilbert se
-  conservan. Las normas extremas y los sistemas ordinarios pasan.
-- Windows, Python 3.12.14, RTX 5060 Ti, driver 617.14. Los tests integrados usan
-  `--capture=sys`; con captura de descriptores se reprodujo una excepción nativa
-  NVRTC `0xc0000008`. Vulkan usa un TEMP accesible y compilador GLSL explícito.
+- **257 targeted tests pass**, with OpenCL/Vulkan/CUDA required;
+  51 PyOpenCL warnings. Ruff checks and formatting pass on all eight modified Python
+  files. The full suite was not run and the wheel was not rebuilt.
+- **52 Decimal80 norm/solver diagnostics** across CUDA custom and cuBLAS,
+  without exceptions; six forward-error alerts on Hilbert systems are
+  retained. Extreme norms and ordinary systems pass.
+- Windows, Python 3.12.14, RTX 5060 Ti, driver 617.14. Integrated tests use
+  `--capture=sys`; file-descriptor capture reproduced a native
+  NVRTC `0xc0000008` exception. Vulkan uses an accessible TEMP and explicit GLSL compiler.
 
-Artefactos en `.artifacts/iterations-2026-10-22`; detalle de alcance y límites en
-el informe enlazado. Las etapas siguientes son snapshots históricos.
+Artifacts in `.artifacts/iterations-2026-10-22`; scope and limits are detailed in
+the linked report. Subsequent stages are historical snapshots.
 
-## Etapa anterior: tres iteraciones — 2026-09-24
+## Previous stage: three iterations — 2026-09-24
 
-La [ronda de septiembre](three-iterations-results.md) incorpora GEMM rectangular custom
-sin copias, DOT/GEMV batched cuBLAS seleccionados según medición y flags de
-transposición privada compilada con CLBlast. Vulkan conserva su kernel después
-de dos confirmaciones aisladas desfavorables para los nuevos tiles.
+The [September round](three-iterations-results.md) adds custom rectangular GEMM
+without copies, measurement-selected cuBLAS batched DOT/GEMV and private
+transpose flags compiled with CLBlast. Vulkan retains its kernel after
+two isolated confirmations unfavorable to the new tiles.
 
-- **1.652 pruebas pasan, una omitida**, ejecutando `tests` y `benchmarks` con
-  OpenCL/Vulkan/CUDA obligatorios y CLBlast nativo; 277 avisos PyOpenCL. La omitida
-  exige un segundo dispositivo OpenCL físico.
-- **38.880 muestras públicas** entre candidatos y selección final, más 2.352
-  muestras de confirmación Vulkan con salida preasignada. Doce procesos
-  secuenciales, sin pruebas GPU de subagentes; puertas de reposo observadas,
-  de 10,5–229,2 s, sin relajar umbrales. Dos controles por caso, orden equilibrado.
-- Los 84 grupos GEMM rectangular conservan bits; siete siguen fuera de tolerancia
-  igualmente en controles y variante. Un grupo Vulkan también conserva una
-  violación idéntica en todos sus modos. CLBlast-layouts y cuBLAS vectorial pasan
-  sus tolerancias. Finalización, rendimiento y validez numérica siguen separados.
-- Wheel desde sdist: **525 pasan, 909 omitidas** en entorno CPU sin GPU bindings.
-  Importación desde el wheel, smoke con imports opcionales bloqueados, extras
-  independientes, NumPy como única dependencia base y fuentes del wheel idénticas.
-- Ruff check/formato globales y `pip check` pasan. El workflow CPU añade los
-  tests de infraestructura de benchmarks; ejecución remota aún pendiente.
+- **1,652 tests pass, one skipped**, running `tests` and `benchmarks` with
+  OpenCL/Vulkan/CUDA required and native CLBlast; 277 PyOpenCL warnings. The skipped test
+  requires a second physical OpenCL device.
+- **38,880 public samples** across candidates and final selection, plus 2,352
+  Vulkan confirmation samples with preallocated output. Twelve sequential
+  processes, without subagent GPU tests; observed idle gates,
+  10.5–229.2 s, without relaxing thresholds. Two controls per case, balanced order.
+- All 84 rectangular GEMM groups preserve bits; seven remain outside tolerance
+  equally in controls and variant. One Vulkan group also retains an
+  identical violation in all modes. CLBlast layouts and vector cuBLAS pass
+  their tolerances. Completion, performance and numerical validity remain separate.
+- Wheel from sdist: **525 pass, 909 skipped** in a CPU environment without GPU bindings.
+  Import from the wheel, smoke test with optional imports blocked, independent
+  extras, NumPy as the only base dependency and identical wheel sources.
+- Global Ruff checks/formatting and `pip check` pass. The CPU workflow adds
+  benchmark infrastructure tests; remote execution remains pending.
 
-Artefactos en `.artifacts/next-three`, con informes completos, muestras,
-telemetría, controles históricos y hashes. Wheel SHA256:
+Artifacts in `.artifacts/next-three`, with complete reports, samples,
+telemetry, historical controls and hashes. Wheel SHA256:
 `83b7c21a716da655aaf4ed7f6b66af703ba259e5a9213924937cec31da94a270`.
-La versión sigue siendo `0.1.0a1`; no se publica. Ver los
-[criterios para la primera estable](release-readiness.md).
+The version remains `0.1.0a1`; it is not published. See the
+[criteria for the first stable release](release-readiness.md).
 
-## Etapa anterior: reevaluación de padding — 2026-09-19
+## Previous stage: padding reassessment — 2026-09-19
 
-La [reevaluación](padding-reassessment.md) conserva padding explícito y
-desactivado por defecto: aporta ganancias en algunas formas rectangulares,
-pero empeora la mayoría. No se modifica el runtime ni su política numérica.
+The [reassessment](padding-reassessment.md) retains explicit padding,
+disabled by default: it gains on some rectangular shapes
+but worsens most. The runtime and its numerical policy are unchanged.
 
-- **30.960 muestras públicas**, 172 grupos forma/backend/semilla, 22 formas
-  distintas y trece procesos completos. OpenCL/Vulkan/CUDA en la suite principal;
-  OpenCL/CUDA en el seguimiento de tamaños cercanos. Reposo observado antes de
-  cada proceso, con esperas de 10,4–62,2 segundos; sin procesos GPU superpuestos.
-- Padding activo/inactivo conserva resultados idénticos bit a bit en los
-  172 grupos. Tres grupos CUDA de la suite principal superan la tolerancia
-  por un elemento, igualmente en los dos controles y con padding. Se conservan
-  los fallos y la tentativa incompleta inicial; completar el benchmark no se
-  presenta como aprobar precisión. OpenCL/Vulkan y el seguimiento pasan el umbral.
-- **173 pruebas de benchmarks pasan**. Las nuevas cubren balance de órdenes,
-  planes independientes, transferencias del recorrido completo, persistencia
-  de fallos, reenlace, validación numérica y CLI. Se corrigen literales float32
-  del generador experimental de variantes, sin modificar kernels del paquete.
-- Ruff check y formato de `src`, `tests`, `benchmarks` y `examples` pasan;
-  sintaxis Python 3.10 comprobada en **128 archivos Python**.
-- Los **29 archivos Python del runtime** coinciden byte a byte con el wheel
-  de la etapa anterior, y sus hashes coinciden en los trece procesos medidos.
-  No se repite la suite completa del runtime; su última ejecución fue la de
-  1.341 pruebas aprobadas documentada debajo.
+- **30,960 public samples**, 172 shape/backend/seed groups, 22 distinct
+  shapes and thirteen complete processes. OpenCL/Vulkan/CUDA in the main suite;
+  OpenCL/CUDA in the nearby-size follow-up. Observed idle time before
+  each process, with waits of 10.4–62.2 seconds; no overlapping GPU processes.
+- Padding on/off retains bitwise identical results in all
+  172 groups. Three CUDA groups in the main suite exceed tolerance
+  by one element, equally in both controls and with padding. Failures
+  and the initial incomplete attempt are retained; completing the benchmark is not
+  presented as passing accuracy. OpenCL/Vulkan and the follow-up pass the threshold.
+- **173 benchmark tests pass**. New tests cover order balance,
+  independent plans, complete-path transfers, failure persistence,
+  rebinding, numerical validation and CLI. Float32 literals in the experimental
+  variant generator are corrected without changing package kernels.
+- Ruff checks and formatting of `src`, `tests`, `benchmarks` and `examples` pass;
+  Python 3.10 syntax checked in **128 Python files**.
+- The **29 Python runtime files** match the previous stage's wheel
+  byte for byte, and their hashes match across all thirteen measured processes.
+  The full runtime suite is not repeated; its last run was the
+  1,341 passed tests documented below.
 
-Artefactos en `.artifacts/padding-decision`, con muestras, errores, telemetría,
-fuentes de los workers, selección de informes y controles de procedencia.
-El benchmark reproducible está en `benchmarks.padding_decision`. El sdist de esta
-ronda incluye el benchmark y documentación actualizados; no hay nueva publicación.
-Se conserva el alcance local: Windows, RTX 5060 Ti, driver 616.64.
+Artifacts in `.artifacts/padding-decision`, with samples, errors, telemetry,
+worker sources, report selection and provenance controls.
+The reproducible benchmark is in `benchmarks.padding_decision`. This round's sdist
+includes the updated benchmark and documentation; there is no new publication.
+Local scope is retained: Windows, RTX 5060 Ti, driver 616.64.
 
-## Etapa anterior: inspección de kernels y copias — 2026-09-19
+## Previous stage: kernel and copy inspection — 2026-09-19
 
-La [inspección](kernel-inspection-results.md) corrige la promoción accidental a
-float64 en cargas de GEMM float32, cachea preparación de copias sin retener
-entradas y cuenta los envíos del padding para seleccionar el ámbito CUDA.
-La política matemática predeterminada no cambia.
+The [inspection](kernel-inspection-results.md) fixes accidental
+float64 promotion in float32 GEMM loads, caches copy preparation without retaining
+inputs and counts padding submissions to select CUDA scope.
+The default math policy is unchanged.
 
-- Runtime con OpenCL/Vulkan/CUDA obligatorios y CLBlast nativo: **1.341 pasan,
-  una omitida** por necesitar otro dispositivo OpenCL; 273 avisos PyOpenCL.
-  La selección inicial de pruebas afectadas dio **115 pasan**.
-- **141 pruebas de benchmarks pasan**, incluidas captura Vulkan/ABI, parser PTX,
-  controles de fuentes, aislamiento del wheel y restauración tras errores.
-- Ruff y formato pasan; sintaxis Python 3.10 comprobada en **126 archivos Python**.
-  Ejecución real en Python 3.12 / Windows / RTX 5060 Ti / driver 616.64.
-- Diagnóstico de compiladores: **72 configuraciones, 1.512 muestras** de pared y
-  360 diagnósticos GPU separados. Revisión de copias: **144 configuraciones,
-  4.464 muestras públicas** con todas las copias incluidas; 36 grupos de resultados
-  idénticos bit a bit. Dos rondas por suite y reposo observado sin relajar controles.
-  Cada informe conserva errores numéricos y alcance de sus relojes.
-- Wheel construido desde sdist: **449 pasan, 893 omitidas** en entorno CPU,
-  importando el wheel y comprobando que no carga dependencias GPU/ejemplos.
-  NumPy continúa como única dependencia base. Runtime del wheel idéntico a fuentes;
-  documentación del sdist y enlaces locales comprobados.
+- Runtime with OpenCL/Vulkan/CUDA required and native CLBlast: **1,341 pass,
+  one skipped** because another OpenCL device is needed; 273 PyOpenCL warnings.
+  The initial selection of affected tests gave **115 pass**.
+- **141 benchmark tests pass**, including Vulkan capture/ABI, PTX parser,
+  source controls, wheel isolation and restoration after errors.
+- Ruff and formatting pass; Python 3.10 syntax checked in **126 Python files**.
+  Actual execution on Python 3.12 / Windows / RTX 5060 Ti / driver 616.64.
+- Compiler diagnostics: **72 configurations, 1,512 wall-time samples** and
+  360 separate GPU diagnostics. Copy review: **144 configurations,
+  4,464 public samples** including all copies; 36 groups of bitwise
+  identical results. Two rounds per suite and observed idle time without relaxing controls.
+  Each report retains numerical errors and clock scope.
+- Wheel built from sdist: **449 pass, 893 skipped** in a CPU environment,
+  importing the wheel and checking that it loads no GPU/example dependencies.
+  NumPy remains the only base dependency. Wheel runtime identical to sources;
+  sdist documentation and local links checked.
 
-Artefactos en `.artifacts/kernel-inspection`. SHA256 del wheel:
+Artifacts in `.artifacts/kernel-inspection`. Wheel SHA256:
 `a577d80ffde9c8be17ab1c2ca9c51278aaf34412e6be84bd0ecd24450fa66e3b`.
-Las herramientas de inspección no forman parte del paquete instalable. No se
-obtuvo ISA Vulkan: el driver no expuso representaciones internas. No se afirma
-validación en otros fabricantes/SO ni ejecución de CI remota. Versión 0.1.0a1,
-sin publicación. `mean` con padding queda documentado como trabajo futuro.
+Inspection tools are not part of the installable package. Vulkan ISA was not
+obtained: the driver exposed no internal representations. Validation on
+other vendors/OSs or remote CI execution is not claimed. Version 0.1.0a1,
+unpublished. Padded `mean` is documented as future work.
 
-## Etapa anterior: padding opcional — 2026-09-18
+## Previous stage: optional padding — 2026-09-18
 
-Se añade [padding opcional](padding.md) a `compile`/su decorador y `matmul`,
-desactivado por defecto. Los ejecutores preparados heredan la política. GEMM
-custom float32 de OpenCL, Vulkan y CUDA puede usar buffers alineados con sus
-tiles; los demás casos conservan su ruta y proveedor.
+[Optional padding](padding.md) is added to `compile`/its decorator and `matmul`,
+disabled by default. Prepared executors inherit the policy. Custom
+float32 GEMM on OpenCL, Vulkan and CUDA may use buffers aligned to their
+tiles; other cases retain their path and provider.
+- Runtime with OpenCL/Vulkan/CUDA required and native CLBlast: **1,323 pass,
+  one skipped** because another OpenCL device is required; 273 PyOpenCL compilation
+  warnings. Uses `PYOPENCL_NO_CACHE=1` and the local Vulkan compiler.
+- **96 benchmark tests pass**. New regressions cover the flag
+  contract, capability selection, BLAS rejection, input rebinding/lifetime,
+  independent results, memory/index limits, broadcast batches,
+  logical dimensions before reductions and bitwise copies of subnormals,
+  signed zeros, NaN and infinities. Preparation errors propagate.
+- [Padding benchmark](padding-results.md): six processes, two rounds,
+  72 configurations, **6,048 public samples** and 756 diagnostic samples with
+  prepacked inputs. All idle controls passed without relaxation;
+  actual pauses of 10.5–156.4 seconds. All 36 pairs produce
+  exactly equal results with padding on/off within the same backend.
+  Tests retain errors against a float64 reference, not just times.
+- Ruff and formatting pass. Python 3.10 syntax checked in **120 Python files**;
+  actual execution on Python 3.12, Windows, RTX 5060 Ti and driver 616.64.
+- Wheel built from sdist: **431 pass, 893 skipped** in the CPU environment
+  without GPU runtimes, importing from the wheel. NumPy is verified to remain
+  the only base dependency and GPU/example extras are not imported when using
+  CPU operations. Wheel runtime matches sources byte for byte.
+- Sdist documentation and local links checked against the workspace.
 
-- Runtime con OpenCL/Vulkan/CUDA obligatorios y CLBlast nativo: **1.323 pasan,
-  una omitida** por requerir otro dispositivo OpenCL; 273 avisos de compilación
-  PyOpenCL. Se usa `PYOPENCL_NO_CACHE=1` y el compilador Vulkan local.
-- **96 pruebas de benchmarks pasan**. Las regresiones nuevas cubren el contrato
-  del flag, elección por capacidad, rechazo de BLAS, reenlace/vida de entradas,
-  resultados independientes, límites de memoria/índices, lotes broadcast,
-  dimensiones lógicas antes de reducciones y copias bit a bit de subnormales,
-  ceros con signo, NaN e infinitos. Los errores de preparación se propagan.
-- [Benchmark de padding](padding-results.md): seis procesos, dos rondas,
-  72 configuraciones, **6.048 muestras públicas** y 756 diagnósticas con entradas
-  preempaquetadas. Todos los controles de reposo se cumplieron sin relajarlos;
-  pausas efectivas de 10,5–156,4 segundos. Las 36 parejas producen resultados
-  exactamente iguales entre padding activo/inactivo dentro del mismo backend.
-  Las pruebas conservan errores contra una referencia float64, no solo tiempos.
-- Ruff y formato pasan. Sintaxis Python 3.10 comprobada en **120 archivos Python**;
-  ejecución real en Python 3.12, Windows, RTX 5060 Ti y driver 616.64.
-- Wheel construido desde sdist: **431 pasan, 893 omitidas** en el entorno CPU
-  sin runtimes GPU, importando desde el wheel. Se verifica que NumPy sigue siendo
-  la única dependencia base y que los extras GPU/ejemplos no se importan al usar
-  las operaciones CPU. El runtime del wheel coincide byte a byte con los fuentes.
-- Documentación del sdist y enlaces locales contrastados con el workspace.
-
-Artefactos en `.artifacts/padding`: muestras, telemetría, errores, metadatos de
-planes, logs/XML de tests, scripts y distribuciones. SHA256 del wheel:
+Artifacts in `.artifacts/padding`: samples, telemetry, errors, plan
+metadata, test logs/XML, scripts and distributions. Wheel SHA256:
 `77f55a8f31d4bd915be9cc763be7f6143fbee3b7937f53815d453da82cd9a2f9`.
-Las cifras no validan otros fabricantes/SO ni CI remota. Versión 0.1.0a1,
-sin publicación.
+Figures do not validate other vendors/OSs or remote CI. Version 0.1.0a1,
+unpublished.
 
-## Etapa anterior: binding, contexto y GEMV CUDA — 2026-09-18
+## Previous stage: binding, context and CUDA GEMV — 2026-09-18
 
-La [ronda de tres optimizaciones](three-actions-results.md) incorpora binding
-posicional común, activación CUDA anidada con scope selectivo y GEMV/DOT custom
-cooperativos. No modifica algoritmos de dominio, extras ni flags matemáticos.
+The [three-optimization round](three-actions-results.md) adds shared positional
+binding, nested CUDA activation with selective scope and cooperative custom
+GEMV/DOT. It does not change domain algorithms, extras or math flags.
 
-- Runtime con OpenCL/Vulkan/CUDA obligatorios y CLBlast nativo: **1.250 pasan,
-  una omitida** por requerir un segundo dispositivo OpenCL; 264 avisos de compilación
-  PyOpenCL. Se configura `PYOPENCL_NO_CACHE=1` y el compilador Vulkan local.
-- **89 pruebas de benchmarks pasan**, incluidas selección de controles, planes
-  separados por variante y limpieza de backends sin `close()` o con fallo al limpiar.
-- Las nuevas regresiones cubren binding/errores/defaults/estáticos y vida de inputs,
-  contexto ajeno, anidación, excepciones, concurrencia, fronteras 255/256/257,
-  matrices rectangulares y lotes, DOT largo, cancelación y valores no finitos.
-  Se conserva el input 129×8193 donde fallaba la tolerancia del kernel serial anterior.
-- **660 configuraciones principales, 492 comparaciones controladas**, 31 muestras
-  por alcance y ocho procesos válidos. Los 168 casos con selección final pasan las
-  tolerancias registradas; los fallos numéricos de controles anteriores permanecen
-  visibles. Reposo observado entre procesos, con un timeout conservado sin saltar el gate.
-- Ruff y formato pasan. Sintaxis Python 3.10 comprobada en 113 archivos Python;
-  ejecución real en Python 3.12 / Windows / RTX 5060 Ti, driver 616.64.
-- Wheel construido desde sdist: **391 pasan, 860 omitidas** en entorno CPU,
-  importando el runtime desde el wheel y comprobando la frontera sin imports
-  opcionales GPU/ejemplos. NumPy sigue siendo la única dependencia base.
-- Runtime del wheel idéntico a los fuentes; documentación del sdist contrastada
-  contra el workspace y enlaces locales comprobados. El seguimiento adicional
-  de ridge no pudo medir por timeout de reposo de 300 segundos; conserva telemetría
-  y no reemplaza los resultados mixtos de las tandas válidas.
+- Runtime with OpenCL/Vulkan/CUDA required and native CLBlast: **1,250 pass,
+  one skipped** because a second OpenCL device is required; 264 PyOpenCL compilation
+  warnings. `PYOPENCL_NO_CACHE=1` and the local Vulkan compiler are configured.
+- **89 benchmark tests pass**, including control selection, separate plans
+  per variant and cleanup of backends without `close()` or with cleanup failure.
+- New regressions cover binding/errors/defaults/statics and input lifetimes,
+  foreign context, nesting, exceptions, concurrency, 255/256/257 boundaries,
+  rectangular matrices and batches, long DOT, cancellation and nonfinite values.
+  The 129×8193 input where the previous serial kernel failed tolerance is retained.
+- **660 main configurations, 492 controlled comparisons**, 31 samples
+  per scope and eight valid processes. All 168 final-selection cases pass
+  recorded tolerances; numerical failures from previous controls remain
+  visible. Observed idle time between processes, retaining one timeout without skipping the gate.
+- Ruff and formatting pass. Python 3.10 syntax checked in 113 Python files;
+  actual execution on Python 3.12 / Windows / RTX 5060 Ti, driver 616.64.
+- Wheel built from sdist: **391 pass, 860 skipped** in a CPU environment,
+  importing the runtime from the wheel and checking the boundary without optional
+  GPU/example imports. NumPy remains the only base dependency.
+- Wheel runtime identical to sources; sdist documentation checked
+  against the workspace and local links checked. The additional ridge follow-up
+  could not measure due to a 300-second idle timeout; it retains telemetry
+  and does not replace mixed results from valid batches.
 
-Artefactos en `.artifacts/three-actions`: resultados por variante, muestras,
-telemetría, errores, diagnóstico, logs/XML de tests y scripts de reproducción.
-Los ensayos exploratorios y fallidos se conservan separados de la selección final.
-Otros fabricantes/SO y CI remota siguen pendientes. Versión 0.1.0a1, sin publicación.
+Artifacts in `.artifacts/three-actions`: per-variant results, samples,
+telemetry, errors, diagnostics, test logs/XML and reproduction scripts.
+Exploratory and failed trials are retained separately from final selection.
+Other vendors/OSs and remote CI remain pending. Version 0.1.0a1, unpublished.
 
-## Etapa anterior: argumentos de lanzamiento CUDA — 2026-09-13
+## Previous stage: CUDA launch arguments — 2026-09-13
 
-La [ronda de despacho CUDA](cuda-dispatch-results.md) reutiliza almacenamiento
-host por kernel sin modificar shaders, planes, algoritmos, contextos ni política
-numérica. Cada llamada vuelve a enlazar valores bajo el lock existente.
+The [CUDA dispatch round](cuda-dispatch-results.md) reuses per-kernel
+host storage without modifying shaders, plans, algorithms, contexts or numerical
+policy. Every call rebinds values under the existing lock.
 
-- Suite de runtime con OpenCL/Vulkan/CUDA obligatorios y CLBlast nativo:
-  **1.200 pasan, una omitida** por necesitar dos dispositivos OpenCL; 264 avisos
-  de compilación PyOpenCL. `PYOPENCL_NO_CACHE=1` evita la caché persistente no
-  escribible. Las pruebas de infraestructura de benchmarks añaden **80 que pasan**.
-- Cinco controles CPU nuevos cubren tamaños/bytes ABI, signo del cero, reenlace
-  sin retención de inputs, tipos/cantidad incorrectos, lock, lanzamiento fallido
-  y reintento, y liberación de argumentos al expulsar un módulo completado.
-  Una regresión GPU comprueba dos fills bool pendientes con valores distintos.
-- La prueba inicial encontró una incompatibilidad `np.bool_`/`ctypes.c_ubyte`;
-  la implementación final usa `c_bool`, con ABI de un byte verificada. La primera
-  tanda amplia de RNG tuvo fallos OpenCL por omitir la configuración de caché y
-  omisiones Vulkan por falta de ruta al compilador; la suite completa final sí
-  configura ambos y pasa. Los logs iniciales se conservan.
-- **236 configuraciones principales**, 31 muestras por alcance: 144 CUDA y 92
-  referencias NumPy/CuPy, en ocho procesos secuenciales válidos y dos rondas.
-  La primera tentativa falló en el runner antes de medir; no se usa como resultado.
-- El seguimiento de ridge cuBLAS f32 añade **seis configuraciones**, tres bloques
-  de 51 pares por alcance. No reproduce la pérdida completa inicial; se conservan
-  ambos conjuntos. Errores numéricos y resultados exactos del control quedan
-  registrados. El ABI bool se corrigió después de los controles exclusivamente
-  flotantes; no cambia sus rutas. El seguimiento ya usa la corrección final.
-- Wheel construido desde sdist: **374 pasan, 827 omitidas** en entorno CPU,
-  importando desde el wheel y bloqueando imports GPU/ejemplos para verificar
-  independencia. No cambian extras ni dependencias base.
-- Ruff/formato, sintaxis Python 3.10 y enlaces locales comprobados. Runtime real
-  en Python 3.12 / Windows / RTX 5060 Ti. Otros dispositivos/SO y CI remota pendientes.
+- Runtime suite with OpenCL/Vulkan/CUDA required and native CLBlast:
+  **1,200 pass, one skipped** because two OpenCL devices are needed; 264 PyOpenCL
+  compilation warnings. `PYOPENCL_NO_CACHE=1` avoids the nonwritable persistent
+  cache. Benchmark infrastructure tests add **80 passes**.
+- Five new CPU controls cover ABI sizes/bytes, zero sign, rebinding
+  without retaining inputs, incorrect types/count, lock, failed launch
+  and retry, and argument release when evicting a completed module.
+  A GPU regression checks two pending bool fills with different values.
+- The initial test found an `np.bool_`/`ctypes.c_ubyte` incompatibility;
+  the final implementation uses `c_bool`, with a verified one-byte ABI. The first
+  broad RNG batch had OpenCL failures from missing cache configuration and
+  Vulkan skips from a missing compiler path; the final full suite does
+  configure both and passes. Initial logs are retained.
+- **236 main configurations**, 31 samples per scope: 144 CUDA and 92
+  NumPy/CuPy references, in eight valid sequential processes and two rounds.
+  The first attempt failed in the runner before measuring; it is not used as a result.
+- The cuBLAS f32 ridge follow-up adds **six configurations**, three blocks
+  of 51 pairs per scope. It does not reproduce the initial complete-path loss; both
+  sets are retained. Numerical errors and exact control results are
+  recorded. The bool ABI was fixed after the exclusively floating-point
+  controls; it does not change their paths. The follow-up already uses the final fix.
+- Wheel built from sdist: **374 pass, 827 skipped** in a CPU environment,
+  importing from the wheel and blocking GPU/example imports to verify
+  independence. Extras and base dependencies are unchanged.
+- Ruff/formatting, Python 3.10 syntax and local links checked. Actual runtime
+  on Python 3.12 / Windows / RTX 5060 Ti. Other devices/OSs and remote CI pending.
 
-Artefactos en `.artifacts/cuda-dispatch`: tests.xml/log, benchmark-tests.log,
-wheel-tests.log, summary.csv, paired-gains.csv, perfiles, JSON y telemetría.
-La versión sigue siendo 0.1.0a1, sin publicación.
+Artifacts in `.artifacts/cuda-dispatch`: tests.xml/log, benchmark-tests.log,
+wheel-tests.log, summary.csv, paired-gains.csv, profiles, JSON and telemetry.
+The version remains 0.1.0a1, unpublished.
 
-## Etapa anterior: fusión CUDA — 2026-09-13
+## Previous stage: CUDA fusion — 2026-09-13
 
-La [ronda de fusión CUDA](cuda-fusion-results.md) implementa lowering elementwise
-y map-reduce mediante la factoría del backend. Conserva las primitivas, la
-política numérica y las funciones de dominio de los comparadores.
+The [CUDA fusion round](cuda-fusion-results.md) implements elementwise
+and map-reduce lowering through the backend factory. It preserves primitives,
+numerical policy and comparators' domain functions.
 
-- Suite completa con OpenCL/Vulkan/CUDA obligatorios y CLBlast nativo:
-  **1.194 pasan, una omitida** por requerir dos dispositivos OpenCL; 264 avisos
-  de compilación PyOpenCL. Se usa `PYOPENCL_NO_CACHE=1`.
-- **127 pruebas CUDA enfocadas** pasaron antes de la suite completa. Cubren
-  ambos proveedores, colas/ejes/entradas vacías, broadcasting, reenlace escalar,
-  salidas compartidas, vidas de buffers, concurrencia, límites de parciales,
-  promoción/estrechamiento, no FMA oculta, cancelación y subnormales.
-- El ejemplo `examples/compiled_numpy.py --backend cuda` valida energía por
-  filas y muestra un plan map-reduce con caché reutilizada.
-- **362 configuraciones medidas**, 21 muestras por alcance: 144 de control CUDA
-  y 218 de referencias. Cuatro procesos CUDA y once de referencias completaron;
-  la segunda ronda NumPy a un hilo no se ejecutó por timeout del reposo. Todos
-  los comparadores GPU tienen dos rondas. Muestras/errores/fallos se conservan.
-- Un seguimiento de covarianza custom float32 añade **seis configuraciones**,
-  31 pares alternados por alcance en tres bloques. No reprodujo la pérdida
-  inicial; ambos conjuntos permanecen separados y la variabilidad se documenta.
-- Wheel construido desde sdist: **369 pasan, 826 omitidas** en entorno CPU.
-  Importación y cálculo/RNG desde el wheel funcionan bloqueando imports GPU y
-  ejemplos. NumPy sigue como única dependencia base, con extras independientes.
-- Ruff/formato y sintaxis Python 3.10 pasan; ejecución real en Python 3.12,
-  Windows y RTX 5060 Ti. No se verificó segundo fabricante ni CI remota.
+- Full suite with OpenCL/Vulkan/CUDA required and native CLBlast:
+  **1,194 pass, one skipped** because two OpenCL devices are required; 264 PyOpenCL
+  compilation warnings. Uses `PYOPENCL_NO_CACHE=1`.
+- **127 focused CUDA tests** passed before the full suite. They cover
+  both providers, tails/axes/empty inputs, broadcasting, scalar rebinding,
+  shared outputs, buffer lifetimes, concurrency, partial limits,
+  promotion/narrowing, no hidden FMA, cancellation and subnormals.
+- The `examples/compiled_numpy.py --backend cuda` example validates row
+  energy and shows a map-reduce plan with cache reuse.
+- **362 measured configurations**, 21 samples per scope: 144 CUDA controls
+  and 218 references. Four CUDA and eleven reference processes completed;
+  the second one-thread NumPy round did not run due to idle timeout. All
+  GPU comparators have two rounds. Samples/errors/failures are retained.
+- A custom float32 covariance follow-up adds **six configurations**,
+  31 alternating pairs per scope in three blocks. It did not reproduce the
+  initial loss; both sets remain separate and variability is documented.
+- Wheel built from sdist: **369 pass, 826 skipped** in a CPU environment.
+  Import and computation/RNG from the wheel work with GPU and
+  example imports blocked. NumPy remains the only base dependency, with independent extras.
+- Ruff/formatting and Python 3.10 syntax pass; actual execution on Python 3.12,
+  Windows and RTX 5060 Ti. A second vendor and remote CI were not verified.
 
-Artefactos: `.artifacts/cuda-fusion`, incluidos tests.xml/log, wheel-tests.log,
-summary.csv, controles originales y seguimiento de covarianza. La versión sigue
-siendo 0.1.0a1, sin publicación. Los informes anteriores conservan su snapshot.
+Artifacts: `.artifacts/cuda-fusion`, including tests.xml/log, wheel-tests.log,
+summary.csv, original controls and covariance follow-up. The version remains
+0.1.0a1, unpublished. Earlier reports retain their snapshots.
 
-## Etapa anterior: routing y finalización Vulkan — 2026-09-13
+## Previous stage: Vulkan routing and completion — 2026-09-13
 
-La [ronda de routing/finalización](routing-completion-results.md) separa adaptadores
-RNG, enlaza factorías/ámbitos al preparar planes y adopta fence reutilizable Vulkan,
-con corrección de reentrada de finalizadores en el pool.
+The [routing/completion round](routing-completion-results.md) separates RNG
+adapters, binds factories/scopes when preparing plans and adopts a reusable Vulkan fence,
+with a fix for pool reentrancy from finalizers.
 
-- Suite final con OpenCL/Vulkan/CUDA obligatorios y CLBlast nativo: **1.142 pasan,
-  una omitida** por necesitar dos dispositivos OpenCL; 264 avisos de compilación
-  PyOpenCL. `PYOPENCL_NO_CACHE=1` evita la caché persistente no escribible del entorno.
-- El primer intento completo descubrió un contador de tests que no aceptaba
-  submits vacíos. Se corrigió para respetar count y verificar un único marcador
-  al leer; 136 pruebas enfocadas y después la suite completa final pasan.
-- Regresiones: factorías independientes del nombre, errores sin fallback,
-  ámbitos enlazados y cleanup, escalares RNG reenlazados, secuencias/contadores,
-  pool reentrante, recursos pendientes y fallos de finalización sin reciclaje.
-- Vulkan: **144 configuraciones** en tres procesos válidos, 31 muestras por modo;
-  diagnóstico separado, tiempos completos, error y convergencia. La primera tanda
-  incompleta por el bug del pool se excluye y se conserva como evidencia.
-- RNG: **264 configuraciones válidas y 12 exclusiones por capacidad** en seis
-  procesos, 31 muestras; igualdad exacta antes/después. Dos controles intercalados
-  adicionales investigan latencias pequeñas OpenCL/CUDA. Control CPU de preparación
-  separado; no equivale a tiempo de dispatch GPU.
-- Wheel construido desde sdist: **369 pasan, 774 omitidas** en entorno CPU.
-  Se verifica importación desde el wheel y cálculo/RNG bloqueando importaciones
-  GPU/ejemplos. NumPy sigue como única dependencia base y los extras son independientes.
-- Ruff/formato, sintaxis Python 3.10 y enlaces locales pasan. Runtime real en
-  Python 3.12 / Windows / RTX 5060 Ti. No se verificó segundo fabricante ni CI remota.
+- Final suite with OpenCL/Vulkan/CUDA required and native CLBlast: **1,142 pass,
+  one skipped** because two OpenCL devices are needed; 264 PyOpenCL compilation
+  warnings. `PYOPENCL_NO_CACHE=1` avoids the environment's nonwritable persistent cache.
+- The first full attempt uncovered a test counter that did not accept
+  empty submits. It was corrected to respect count and verify one marker
+  on reading; 136 focused tests and then the final full suite pass.
+- Regressions: name-independent factories, errors without fallback,
+  bound scopes and cleanup, rebound RNG scalars, sequences/counters,
+  reentrant pool, pending resources and completion failures without recycling.
+- Vulkan: **144 configurations** in three valid processes, 31 samples per mode;
+  separate diagnostics, complete times, error and convergence. The first batch,
+  incomplete due to the pool bug, is excluded and retained as evidence.
+- RNG: **264 valid configurations and 12 capability exclusions** in six
+  processes, 31 samples; exact before/after equality. Two additional interleaved
+  controls investigate small OpenCL/CUDA latencies. Separate CPU preparation
+  control; it is not equivalent to GPU dispatch time.
+- Wheel built from sdist: **369 pass, 774 skipped** in a CPU environment.
+  Import from the wheel and computation/RNG with GPU/example imports blocked
+  are verified. NumPy remains the only base dependency and extras are independent.
+- Ruff/formatting, Python 3.10 syntax and local links pass. Actual runtime on
+  Python 3.12 / Windows / RTX 5060 Ti. A second vendor and remote CI were not verified.
 
-Artefactos: `.artifacts/routing-completion`, incluidos tests-final.xml/log,
-wheel-tests.log, CSV con todas las mediciones y JSON originales/derivados. La
-corrección de metadatos de referencias idle/download conserva hash y original;
-no modifica tiempos ni errores. La versión continúa 0.1.0a1, sin publicación.
+Artifacts: `.artifacts/routing-completion`, including tests-final.xml/log,
+wheel-tests.log, CSV with all measurements and original/derived JSON files. The
+idle/download reference metadata correction preserves hash and original;
+it does not change times or errors. The version remains 0.1.0a1, unpublished.
 
-## Etapa anterior: staging de lectura y RNG — 2026-09-13
+## Previous stage: read staging and RNG — 2026-09-13
 
-La [ronda de staging/RNG](staging-random-results.md) conserva mapeos Vulkan de
-readback, manteniendo las subidas anteriores. Añade Philox residente con una API
-acotada y capacidades por distribución/dtype.
+The [staging/RNG round](staging-random-results.md) retains Vulkan readback
+mappings, keeping previous uploads. It adds resident Philox with a limited
+API and capabilities per distribution/dtype.
 
-- Suite completa con OpenCL/Vulkan/CUDA obligatorios y CLBlast nativo:
-  **1.202 pasan, una omitida** por necesitar dos dispositivos OpenCL, 264 avisos
-  de compilación PyOpenCL. Esta ejecución precede a acotar persistencia a readback.
-- Tras esa selección y el ajuste de parámetros RNG: **72 pruebas enfocadas**
-  pasan (staging y RNG en los cuatro backends) y **198 pruebas Vulkan** pasan.
-  Se cubren mapeos, pool, comandos, recursos pendientes, fusión y operaciones.
-  La regresión CPU de escalas negativas que redondean a cero y enteros enormes
-  pasa también; no consume contadores inválidos.
-- **30 pruebas CPU** de métricas/validación RNG/runner pasan después de corregir
-  la etiqueta de precisión de referencias float32 del mismo dtype.
-- **64 configuraciones** finales comparan readback con métodos del wheel anterior,
-  31 muestras en dos rondas. Otras 64 midieron la variante de persistencia general
-  descartada como predeterminada. No cambian los kernels matriciales/solvers.
-- RNG: **228 configuraciones válidas, 12 exclusiones por capacidad** en diez
-  procesos; otro control Vulkan final añade 36 válidas y 12 exclusiones. Se
-  conservan error, momentos, muestras y reposo observado (hasta 31,1 s).
-- Wheel desde sdist: **354 pasan, 772 omitidas** en entorno CPU. Importación
-  verificada dentro del wheel y cálculo/RNG con módulos GPU/ejemplos bloqueados.
-  Extras separados, NumPy como única dependencia base; ejemplos/benchmarks fuera
-  del wheel. No cambia la versión ni se publica.
-- Ruff/formato, sintaxis Python 3.10 y enlaces locales verificados. Ejecución real
-  en Python 3.12 / Windows / RTX 5060 Ti. Sin segundo fabricante ni CI remota.
+- Full suite with OpenCL/Vulkan/CUDA required and native CLBlast:
+  **1,202 pass, one skipped** because two OpenCL devices are needed, 264 PyOpenCL
+  compilation warnings. This run precedes limiting persistence to readback.
+- After that selection and RNG parameter adjustment: **72 focused tests**
+  pass (staging and RNG on all four backends) and **198 Vulkan tests** pass.
+  Coverage includes mappings, pool, commands, pending resources, fusion and operations.
+  The CPU regression for negative scales rounding to zero and enormous integers
+  also passes; it does not consume invalid counters.
+- **30 CPU tests** of RNG metrics/validation/runner pass after correcting
+  the accuracy label for same-dtype float32 references.
+- **64 final configurations** compare readback with methods from the previous wheel,
+  31 samples in two rounds. Another 64 measured the general-persistence variant
+  rejected as the default. Matrix kernels/solvers are unchanged.
+- RNG: **228 valid configurations, 12 capability exclusions** in ten
+  processes; another final Vulkan control adds 36 valid cases and 12 exclusions.
+  Error, moments, samples and observed idle time (up to 31.1 s) are retained.
+- Wheel from sdist: **354 pass, 772 skipped** in a CPU environment. Import
+  verified within the wheel and computation/RNG with GPU/example modules blocked.
+  Separate extras, NumPy as the only base dependency; examples/benchmarks outside
+  the wheel. The version is unchanged and unpublished.
+- Ruff/formatting, Python 3.10 syntax and local links verified. Actual execution
+  on Python 3.12 / Windows / RTX 5060 Ti. No second vendor or remote CI.
 
-Artefactos en `.artifacts/staging-random`. Los JSON derivados `corrected-random`
-rectifican una etiqueta de referencia de igual precisión y conservan hash/original;
-no alteran tiempos ni errores numéricos. La primera suite sin configurar CLBlast
-queda como log histórico; la ejecución requerida posterior sí lo incluye.
+Artifacts in `.artifacts/staging-random`. Derived `corrected-random` JSON files
+correct a same-precision reference label and preserve hash/original;
+they do not alter times or numerical errors. The first suite without CLBlast
+configuration remains as a historical log; the subsequent required run does include it.
 
-## Etapa anterior: estabilidad y guardas GEMM — 2026-09-13
+## Previous stage: stability and GEMM guards — 2026-09-13
 
-La [ronda de kernels](kernel-stability-results.md) separa finalización, reposo
-observado y calentamiento; compara diez variantes y promueve solo la
-especialización de guardas OpenCL en tiles completos.
+The [kernel round](kernel-stability-results.md) separates completion, observed
+idle time and warmup; it compares ten variants and promotes only
+OpenCL guard specialization on full tiles.
 
-- **1.122 pruebas pasan, una omitida**, ejecutando `tests` y `benchmarks`, con
-  OpenCL/Vulkan/CUDA obligatorios y CLBlast disponible. La omisión requiere dos
-  dispositivos OpenCL; se emitieron 256 avisos de compilación PyOpenCL.
-- **300 configuraciones de kernels** (tres backends, dos rondas), 21 muestras,
-  con precisión y centinelas de salida correctos. Reposo observado 10,4–16,6 s,
-  ventanas térmicas aceptadas de 40–42 °C. No implica clocks constantes.
-- **88 configuraciones públicas** de control GEMM OpenCL, misma instancia y
-  contexto, sin errores y con métricas numéricas iguales entre variantes.
-- **42 casos adversos OpenCL**, cero excepciones y las mismas nueve alertas
-  anteriores. El resto de proveedores no se volvió a medir en precisión adversa;
-  sus shaders predeterminados se conservaron.
-- Wheel desde sdist: **327 pasan, 727 omitidas** en el entorno CPU. Importación
-  comprobada dentro del wheel, extras independientes y ejemplos/solvers fuera
-  del paquete. Único cambio del runtime: `_gemm.py`; los shaders guardados de los
-  12 controles siguen siendo idénticos al wheel anterior.
-- Pruebas CPU del protocolo: timeout, actividad/temperatura, pérdida de sensores,
-  identidad, orden de procesos, fallo del worker, calentamiento y restauración
-  del control ante excepciones. No se usan sus tiempos como benchmarks GPU.
-  Tras el ajuste final de propagación del selector de telemetría al worker,
-  **25 pruebas enfocadas** pasan; no se repite la suite GPU por ese cambio de CLI.
-- Ruff y formato pasan (88 archivos). Sin cambios de dependencias o API pública;
-  artefactos en `.artifacts/kernel-stability`. Otro hardware/SO y CI remota pendientes.
+- **1,122 tests pass, one skipped**, running `tests` and `benchmarks`, with
+  OpenCL/Vulkan/CUDA required and CLBlast available. The skip requires two
+  OpenCL devices; 256 PyOpenCL compilation warnings were emitted.
+- **300 kernel configurations** (three backends, two rounds), 21 samples,
+  with correct accuracy and output sentinels. Observed idle time 10.4–16.6 s,
+  accepted thermal windows of 40–42 °C. This does not imply constant clocks.
+- **88 public configurations** of OpenCL GEMM controls, same instance and
+  context, without errors and with equal numerical metrics between variants.
+- **42 adversarial OpenCL cases**, zero exceptions and the same nine previous
+  alerts. Other providers were not remeasured for adversarial accuracy;
+  their default shaders were preserved.
+- Wheel from sdist: **327 pass, 727 skipped** in the CPU environment. Import
+  checked within the wheel, independent extras and examples/solvers outside
+  the package. Only runtime change: `_gemm.py`; saved shaders from all
+  12 controls remain identical to the previous wheel.
+- CPU protocol tests: timeout, activity/temperature, sensor loss,
+  identity, process order, worker failure, warmup and control restoration
+  on exceptions. Their times are not used as GPU benchmarks.
+  After the final telemetry-selector propagation adjustment to the worker,
+  **25 focused tests** pass; the GPU suite is not repeated for that CLI change.
+- Ruff and formatting pass (88 files). No dependency or public API changes;
+  artifacts in `.artifacts/kernel-stability`. Other hardware/OSs and remote CI pending.
 
-## Etapa anterior: ejecución compartida — 2026-09-13
+## Previous stage: shared execution — 2026-09-13
 
-Push descriptors Vulkan por capacidad y fallback a sets, caché de metadatos e
-índices acotados OpenCL, tiles float32 compartidos y matmul por lotes CUDA.
-Ver [resultados, controles y gaps](backend-sharing-results.md).
+Capability-based Vulkan push descriptors and sets fallback, OpenCL metadata cache and
+bounded indices, shared float32 tiles and CUDA batched matmul.
+See [results, controls and gaps](backend-sharing-results.md).
 
-- Suite completa: **1.084 pasan, una omitida**, con los tres backends obligatorios
-  y CLBlast disponible. La omisión requiere dos dispositivos OpenCL. Después del
-  ajuste final de la ruta sin lotes y nueva cobertura, **75 pruebas CUDA pasan**.
-  La ejecución completa anterior emitió 252 avisos del compilador PyOpenCL.
-- Wheel final construido desde sdist: **326 pasan, 719 omitidas** en el entorno
-  CPU, importando directamente del wheel sin reemplazar su instalación histórica.
-  NumPy es la única dependencia base, los extras son independientes y ejemplos,
-  benchmarks y solvers quedan fuera del wheel; el sdist conserva los ejemplos.
-- Vulkan: dos controles de 60 configuraciones y un control adicional de cinco
-  casos sobre el mismo VkDevice. Recursos en vuelo, fallback por límite, salidas
-  y convergencia se validan. La mejora de tiempo es modesta/mixta.
-- OpenCL/CUDA: dos rondas por proveedor con funciones anteriores/actuales sobre
-  el mismo contexto; 21 muestras. Los lotes ausentes en el wheel histórico se
-  declaran no soportados. El control detectó y permitió quitar una penalización
-  inicial CUDA en las operaciones sin lotes.
-- **144 configuraciones** en procesos con proveedor aislado y otras **144** con
-  APIs intercaladas. Todas válidas, sin backends ausentes. La intercalación altera
-  mucho algunos tiempos; no se usa como techo físico ni coste puro de abstracción.
-- **104 configuraciones aplicadas irregulares**, siete muestras, sin excepciones
-  ni ausencias. El primer intento omitió CuPy por su caché fuera del workspace;
-  el final usa CUPY_CACHE_DIR local.
-- **158 configuraciones adversas Decimal80**, cero excepciones y las mismas
-  **40 alertas** de la ronda CUDA inicial; 52 casos CUDA norma/solver excluidos
-  explícitamente. Las alertas numéricas siguen pendientes.
-- AST de solvers idéntico al sdist anterior; las aplicaciones cambian solo el
-  texto del alcance CUDA en metadatos. Ruff y formato pasan (81 archivos),
-  sintaxis Python 3.10 analizada; ejecución real en Python 3.12.
+- Full suite: **1,084 pass, one skipped**, with all three backends required
+  and CLBlast available. The skip requires two OpenCL devices. After the
+  final nonbatched-path adjustment and new coverage, **75 CUDA tests pass**.
+  The earlier full run emitted 252 PyOpenCL compiler warnings.
+- Final wheel built from sdist: **326 pass, 719 skipped** in the CPU
+  environment, importing directly from the wheel without replacing its historical installation.
+  NumPy is the only base dependency, extras are independent and examples,
+  benchmarks and solvers remain outside the wheel; the sdist retains examples.
+- Vulkan: two controls of 60 configurations and an additional five-case
+  control on the same VkDevice. In-flight resources, limit fallback, outputs
+  and convergence are validated. Time improvement is modest/mixed.
+- OpenCL/CUDA: two rounds per provider with previous/current functions on
+  the same context; 21 samples. Batches absent in the historical wheel are
+  declared unsupported. The control detected and enabled removal of an
+  initial CUDA penalty on nonbatched operations.
+- **144 configurations** in isolated-provider processes and another **144** with
+  interleaved APIs. All valid, without missing backends. Interleaving changes
+  some times substantially; it is not used as a physical ceiling or pure abstraction cost.
+- **104 irregular applied configurations**, seven samples, without exceptions
+  or absences. The first attempt skipped CuPy due to its cache outside the workspace;
+  the final run uses a local CUPY_CACHE_DIR.
+- **158 adversarial Decimal80 configurations**, zero exceptions and the same
+  **40 alerts** as the initial CUDA round; 52 CUDA norm/solver cases explicitly
+  excluded. Numerical alerts remain pending.
+- Solver AST identical to the previous sdist; applications change only
+  CUDA-scope text in metadata. Ruff and formatting pass (81 files),
+  Python 3.10 syntax analyzed; actual execution on Python 3.12.
 
-La evidencia local corresponde a RTX 5060 Ti, Windows 11 y driver 616.64. Otro
-hardware/SO y CI remota siguen pendientes. Artefactos, scripts de diagnóstico y
-proveniencia en `.artifacts/backend-sharing`.
+Local evidence corresponds to RTX 5060 Ti, Windows 11 and driver 616.64. Other
+hardware/OSs and remote CI remain pending. Artifacts, diagnostic scripts and
+provenance in `.artifacts/backend-sharing`.
 
-## Etapa anterior: frontera de comandos Vulkan — 2026-09-12
+## Previous stage: Vulkan command boundary — 2026-09-12
 
-La tabla CFFI por dispositivo reduce conversiones en llamadas frecuentes sin
-cambiar las recurrencias, tolerancias, frecuencia de comprobación, kernels de los
-workloads medidos ni número de comandos. Incluye diagnóstico separado de tiempos
-host/GPU y una corrección independiente de potencia float32 con bases negativas.
-Ver [mediciones y límites](vulkan-dispatch-results.md).
+The per-device CFFI table reduces conversions in frequent calls without
+changing recurrences, tolerances, check frequency, measured workload kernels
+or command counts. It includes separate host/GPU timing diagnostics
+and an independent fix for float32 power with negative bases.
+See [measurements and limits](vulkan-dispatch-results.md).
 
-- **1.045 pruebas pasan, una omitida**, con OpenCL/Vulkan/CUDA obligatorios y
-  CLBlast nativo disponible. La omisión requiere dos dispositivos OpenCL. Incluye
-  regresiones de ABI/VkResult, aislamiento por dispositivo, recursos en vuelo,
-  potencia y limpieza de la instrumentación. Se emitieron 251 avisos de compilación
-  de PyOpenCL, sin fallos de pruebas.
-- **324 pasan, 677 omitidas** cargando el wheel directamente en el entorno CPU
-  sin runtimes GPU. Se verificó el origen dentro del wheel, importación/cálculo
-  con módulos GPU y ejemplos bloqueados, y extras independientes de CUDA.
-- Wheel construido desde sdist: excluye ejemplos, benchmarks y solvers; el sdist
-  conserva los ejemplos. NumPy sigue siendo la única dependencia base. No se
-  añadió una dependencia binaria ni se reemplazó la instalación CPU histórica.
-- **Dos controles de 60 configuraciones**, 21 muestras por modalidad: rutas
-  wrapped/direct intercaladas, 30 casos float32/64 por proceso. Sin errores; mismas
-  salidas, métricas numéricas, iteraciones, conteos de comandos y bytes copiados.
-  Diagnóstico instrumentado fuera de las muestras cronometradas.
-- **72 configuraciones aplicadas irregulares**, siete muestras: NumPy, OpenCL
-  custom/CLBlast, Vulkan y CuPy. Sin errores ni backends ausentes. No sustituye el
-  control pareado para atribuir causalmente una mejora al ejecutor.
-- **42 configuraciones de precisión adversa Vulkan**, tres muestras: diez alertas,
-  cero excepciones. El conjunto de alertas coincide con el subconjunto Vulkan de
-  la ronda CUDA anterior. La salida 1 del diagnóstico señala esos hallazgos; no
-  significa que hayan quedado resueltos los problemas de cancelación o subnormales.
-- Ruff y formato pasan (78 archivos). Sintaxis Python 3.10 analizada; ejecución
-  real en Python 3.12. Otro fabricante/SO y CI remota siguen pendientes.
+- **1,045 tests pass, one skipped**, with OpenCL/Vulkan/CUDA required and
+  native CLBlast available. The skip requires two OpenCL devices. Includes
+  regressions for ABI/VkResult, per-device isolation, in-flight resources,
+  power and instrumentation cleanup. 251 PyOpenCL compilation warnings
+  were emitted, without test failures.
+- **324 pass, 677 skipped** loading the wheel directly in the CPU environment
+  without GPU runtimes. Origin within the wheel, import/computation
+  with GPU modules and examples blocked, and CUDA-independent extras were verified.
+- Wheel built from sdist: excludes examples, benchmarks and solvers; the sdist
+  retains examples. NumPy remains the only base dependency. No binary
+  dependency was added and the historical CPU installation was not replaced.
+- **Two controls of 60 configurations**, 21 samples per mode: interleaved
+  wrapped/direct paths, 30 float32/64 cases per process. No errors; same
+  outputs, numerical metrics, iterations, command counts and copied bytes.
+  Instrumented diagnostics outside timed samples.
+- **72 irregular applied configurations**, seven samples: NumPy, OpenCL
+  custom/CLBlast, Vulkan and CuPy. No errors or missing backends. This does not replace
+  the paired control for causally attributing an improvement to the executor.
+- **42 adversarial Vulkan accuracy configurations**, three samples: ten alerts,
+  zero exceptions. The alert set matches the Vulkan subset of
+  the previous CUDA round. Diagnostic exit code 1 flags those findings; it does not
+  mean cancellation or subnormal problems have been resolved.
+- Ruff and formatting pass (78 files). Python 3.10 syntax analyzed; actual
+  execution on Python 3.12. Other vendors/OSs and remote CI remain pending.
 
-Artefactos: `.artifacts/vulkan-dispatch`, con `final-1.json`, `final-2.json`,
-`comparison.csv`, `accuracy.json`, `applications.json`, logs, distribuciones y
-manifiesto. Las fuentes del runtime y runner coinciden con los hashes registrados
-en ambos controles finales. No es todavía un ejecutor C/C++ ni una medición del
-límite físico de Vulkan o PCIe.
+Artifacts: `.artifacts/vulkan-dispatch`, with `final-1.json`, `final-2.json`,
+`comparison.csv`, `accuracy.json`, `applications.json`, logs, distributions and
+manifest. Runtime and runner sources match hashes recorded
+in both final controls. This is not yet a C/C++ executor or a measurement of
+the physical limit of Vulkan or PCIe.
 
-## Etapa anterior: separación de aplicaciones — 2026-09-12
+## Previous stage: application separation — 2026-09-12
 
-Los solvers y sistemas preparados se movieron a `examples/solvers.py`, fuera de
-`src/openpacho` y de la API/rueda instalable. Se retiró la capacidad solver del
-runtime CUDA. `get_backend(array)` permite que ejemplos y clientes recuperen
-la instancia existente por API pública, sin copiar ni reconfigurar sus datos.
-Ver [dirección acordada](architecture-evolution.md) y [ejemplos](../examples/README.md).
+Solvers and prepared systems moved to `examples/solvers.py`, outside
+`src/openpacho` and the installable API/wheel. Solver capability was removed from
+the CUDA runtime. `get_backend(array)` allows examples and clients to recover
+the existing instance through the public API without copying or reconfiguring their data.
+See [agreed direction](architecture-evolution.md) and [examples](../examples/README.md).
 
-- **1.024 pruebas pasan, una omitida**, con OpenCL/Vulkan/CUDA obligatorios y
-  CLBlast nativo disponible. La omisión sigue requiriendo dos dispositivos OpenCL.
-- **316 pasan, 672 omitidas** al cargar el wheel desde un entorno CPU sin runtimes
-  GPU; se comprobó la ruta de importación dentro del wheel. Se cargó directamente
-  sin reemplazar la instalación histórica del entorno CPU.
-- Wheel construido desde sdist: excluye `openpacho.solvers`, ejemplos y benchmarks.
-  El sdist incluye los ejemplos. Metadatos: NumPy como única dependencia base;
-  extras OpenCL/Vulkan independientes de CUDA. Importación y cálculo CPU con
-  módulos GPU y `examples` bloqueados; no se descargaron nuevas dependencias.
-- Comparación AST contra el wheel CUDA anterior: las trece funciones de cálculo,
-  preparación y entrada conservan su estructura, salvo el acceso al backend por
-  API pública. No se cambiaron recurrencias, tolerancias ni chequeos de convergencia.
-- Ruff y formato pasan (73 archivos). Ejemplos CPU ejecutados. Tras cerrar la
-  auditoría de documentación/metadatos, **28 pruebas enfocadas** adicionales pasan.
-- La primera ejecución OpenCL encontró una caché SQLite no escribible fuera del
-  workspace. Se repitió con `PYOPENCL_NO_CACHE=1`; es una configuración de pruebas,
-  no una modificación del runtime ni una medición de rendimiento.
-- Un test subprocess de wheel inicialmente cargó el paquete histórico del entorno;
-  se corrigió para usar el mismo origen de paquete que su proceso padre.
-- No se repitieron benchmarks de rendimiento ni precisión adversa en esta separación.
-  Los resultados siguientes corresponden a sus snapshots; no se anuncian speedups nuevos.
-  Otro hardware/SO y CI remota siguen pendientes.
+- **1,024 tests pass, one skipped**, with OpenCL/Vulkan/CUDA required and
+  native CLBlast available. The skip still requires two OpenCL devices.
+- **316 pass, 672 skipped** when loading the wheel from a CPU environment without GPU
+  runtimes; the import path within the wheel was checked. It was loaded directly
+  without replacing the CPU environment's historical installation.
+- Wheel built from sdist: excludes `openpacho.solvers`, examples and benchmarks.
+  The sdist includes examples. Metadata: NumPy as the only base dependency;
+  OpenCL/Vulkan extras independent of CUDA. CPU import and computation with
+  GPU modules and `examples` blocked; no new dependencies were downloaded.
+- AST comparison against the previous CUDA wheel: all thirteen computation,
+  preparation and entry functions retain their structure except for backend access through
+  the public API. Recurrences, tolerances and convergence checks were unchanged.
+- Ruff and formatting pass (73 files). CPU examples executed. After closing the
+  documentation/metadata audit, **28 additional focused tests** pass.
+- The first OpenCL run encountered a nonwritable SQLite cache outside the
+  workspace. It was repeated with `PYOPENCL_NO_CACHE=1`; this is test configuration,
+  not a runtime modification or performance measurement.
+- A wheel subprocess test initially loaded the environment's historical package;
+  it was corrected to use the same package origin as its parent process.
+- Performance and adversarial accuracy benchmarks were not repeated for this separation.
+  Subsequent results correspond to their snapshots; no new speedups are announced.
+  Other hardware/OSs and remote CI remain pending.
 
-Artefactos: `.artifacts/architecture-scope`, con logs, wheel/sdist y manifiesto de
-fuentes. Los modos matemáticos, autotuning, layouts y ejecutor nativo descritos en
-la dirección arquitectónica siguen siendo diseño pendiente.
+Artifacts: `.artifacts/architecture-scope`, with logs, wheel/sdist and source
+manifest. Math modes, autotuning, layouts and the native executor described in
+the architectural direction remain pending designs.
 
-## Etapa anterior: Vulkan por capacidad y CUDA inicial — 2026-09-12
+## Previous stage: capability-based Vulkan and initial CUDA — 2026-09-12
 
-La implementación CUDA y la nueva política de reutilización Vulkan se documentan
-en [resultados actuales](cuda-initial-results.md) y [alcance CUDA](cuda.md).
-OpenCL/Vulkan siguen siendo opciones independientes. CUDA aún no incorpora
-fusión, normas estables, solvers ni matmul por lotes.
+The CUDA implementation and new Vulkan reuse policy are documented
+in [current results](cuda-initial-results.md) and [CUDA scope](cuda.md).
+OpenCL/Vulkan remain independent options. CUDA does not yet include
+fusion, stable norms, solvers or batched matmul.
 
-- **1.019 pruebas pasan, una omitida**, con OpenCL/Vulkan/CUDA obligatorios y
-  CLBlast nativo. La omitida requiere dos dispositivos OpenCL.
-- Wheel desde sdist instalado sin dependencias GPU: **311 pasan, 672 omitidas**.
-  Importación desde site-packages; runtime CUDA probado además sin CuPy.
-- **208 configuraciones aplicadas**, siete muestras por modo, cero errores o
-  ausencias. CUDA diferencia plan sin fusión de lowering fusionado.
-- **158 configuraciones de precisión adversa**, cero excepciones, 40 alertas
-  numéricas. Se registran 52 casos norma/solver fuera del alcance CUDA inicial.
-- Control Vulkan alternado en cuatro procesos: 1.432 reservas/liberaciones a
-  cero, mismos dispatches/errores; aumenta la caché retenida de 1 a 3 MiB.
-- Ruff y formato pasan. Sintaxis Python 3.10 analizada, runtime Python 3.12.14.
-  Wheel/sdist: `.artifacts/dist-cuda-initial`. Otro hardware/SO y CI remota pendientes.
+- **1,019 tests pass, one skipped**, with OpenCL/Vulkan/CUDA required and
+  native CLBlast. The skipped test requires two OpenCL devices.
+- Wheel from sdist installed without GPU dependencies: **311 pass, 672 skipped**.
+  Import from site-packages; CUDA runtime also tested without CuPy.
+- **208 applied configurations**, seven samples per mode, zero errors or
+  absences. CUDA distinguishes an unfused plan from fused lowering.
+- **158 adversarial accuracy configurations**, zero exceptions, 40 numerical
+  alerts. 52 norm/solver cases outside initial CUDA scope are recorded.
+- Alternating Vulkan control in four processes: 1,432 allocations/releases down to
+  zero, same dispatches/errors; retained cache increases from 1 to 3 MiB.
+- Ruff and formatting pass. Python 3.10 syntax analyzed, Python 3.12.14 runtime.
+  Wheel/sdist: `.artifacts/dist-cuda-initial`. Other hardware/OSs and remote CI pending.
 
-## Etapa anterior: solvers, aplicaciones y preparación CUDA — 2026-09-08
+## Previous stage: solvers, applications and CUDA preparation — 2026-09-08
 
-- **965 pasan, 1 omitida** en la suite completa de runtime y adaptadores,
-  incluidas 144 pruebas de formas irregulares y cuatro regresiones del pool Vulkan. La omitida requiere dos dispositivos OpenCL.
-- Wheel final construido desde sdist e instalado sin PyOpenCL/Vulkan: **294
-  pasan, 635 omitidas** por backends opcionales ausentes. Se verificó la importación
-  desde site-packages, fuera de `src`. Distribuciones en `.artifacts/dist-next-applications`.
-- **63 configuraciones de solvers**, siete muestras por modalidad; cero errores
-  de ejecución o backends ausentes. Datos, tolerancias e iteraciones conservados.
-- **126 casos adversos OpenPacho GPU**, tres muestras: 28 indicadores, sin
-  excepciones/ausencias. Son los mismos indicadores del subconjunto anterior.
-- Lowering separado por backend, grupos Vulkan en un command buffer y planes
-  de solver entre observaciones. CUDA todavía no es un backend disponible.
-- **144 configuraciones aplicadas finales** de covarianza/ridge (72 alineadas
-  y 72 irregulares), siete muestras por modo, sin errores ni backends ausentes;
-  preparación y precisión visibles. El control del pool aísla su política con
-  mediciones de reservas y errores numéricos.
-- [Resultados actuales](solver-applications-results.md),
-  [suite aplicada](application-measurement-plan.md) y [camino CUDA](cuda-backend-plan.md).
+- **965 pass, 1 skipped** in the full runtime and adapter suite,
+  including 144 irregular-shape tests and four Vulkan pool regressions. The skipped test requires two OpenCL devices.
+- Final wheel built from sdist and installed without PyOpenCL/Vulkan: **294
+  pass, 635 skipped** for missing optional backends. Import from
+  site-packages, outside `src`, verified. Distributions in `.artifacts/dist-next-applications`.
+- **63 solver configurations**, seven samples per mode; zero execution
+  errors or missing backends. Data, tolerances and iterations preserved.
+- **126 adversarial OpenPacho GPU cases**, three samples: 28 indicators, without
+  exceptions/absences. These are the same indicators as the previous subset.
+- Lowering separated by backend, Vulkan groups in one command buffer and solver
+  plans between observations. CUDA is not yet an available backend.
+- **144 final applied configurations** of covariance/ridge (72 aligned
+  and 72 irregular), seven samples per mode, without errors or missing backends;
+  preparation and accuracy visible. The pool control isolates its policy through
+  allocation measurements and numerical errors.
+- [Current results](solver-applications-results.md),
+  [applied suite](application-measurement-plan.md) and [CUDA path](cuda-backend-plan.md).
 
-## Etapa anterior: Vulkan, GEMM y estabilidad — 2026-09-07
+## Previous stage: Vulkan, GEMM and stability — 2026-09-07
 
-- **809 pasan, 1 omitida**, con OpenCL/Vulkan obligatorios y CLBlast nativo.
-  La omitida requiere dos dispositivos OpenCL.
-- Wheel construido desde sdist, instalación CPU sin backends GPU e importación
-  desde site-packages: **249 pasan, 527 omitidas**.
-- **319 configuraciones de rendimiento y 48 de preparación**, siete muestras
-  por modalidad, sin errores de validación ni backends ausentes.
-- **264 configuraciones de precisión**, tres muestras: 68 indicadores diagnósticos,
-  cero excepciones. Incluye limitaciones numéricas de las referencias; no son
-  68 bugs automáticamente ni se ocultan bajo la marca de ejecución correcta.
-- Ruff y formato pasan. Distribuciones: `.artifacts/dist-numerics-vulkan`.
-- [Resultados y gaps actuales](numerics-vulkan-results.md),
-  [precisión](numerical-accuracy.md) e [investigación de CLBlast](clblast-techniques.md).
-  AMD/Intel y CI remota siguen sin validación en esta sesión.
+- **809 pass, 1 skipped**, with OpenCL/Vulkan required and native CLBlast.
+  The skipped test requires two OpenCL devices.
+- Wheel built from sdist, CPU installation without GPU backends and import
+  from site-packages: **249 pass, 527 skipped**.
+- **319 performance configurations and 48 preparation configurations**, seven samples
+  per mode, without validation errors or missing backends.
+- **264 accuracy configurations**, three samples: 68 diagnostic indicators,
+  zero exceptions. Includes numerical limitations of references; they are not
+  automatically 68 bugs and are not hidden under the label of successful execution.
+- Ruff and formatting pass. Distributions: `.artifacts/dist-numerics-vulkan`.
+- [Current results and gaps](numerics-vulkan-results.md),
+  [accuracy](numerical-accuracy.md) and [CLBlast investigation](clblast-techniques.md).
+  AMD/Intel and remote CI remain unvalidated in this session.
 
-## Etapa anterior: map-reduce, preparación y BLAS batched — 2026-09-06
+## Previous stage: map-reduce, preparation and batched BLAS — 2026-09-06
 
-- **625 pasan, 1 omitida**, con OpenCL/Vulkan obligatorios y CLBlast nativo.
-  La omitida necesita dos dispositivos OpenCL.
-- Wheel desde sdist e instalado sin dependencias GPU: **208 pasan, 401 omitidas**.
-- **319 configuraciones comparativas y 48 de preparación**: siete muestras por
-  modo, sin errores de validación. Controles intercalados adicionales para tiling,
-  batching y bindings de solvers; perfiles antes/después con origen de código.
-- Ruff y formato pasan. Wheel/sdist: `.artifacts/dist-remaining-suite`.
-- [Implementaciones, resultados mixtos y gaps restantes](remaining-suite-results.md).
-  No se valida hardware AMD/Intel ni se resuelve todavía la norma para valores extremos.
+- **625 pass, 1 skipped**, with OpenCL/Vulkan required and native CLBlast.
+  The skipped test needs two OpenCL devices.
+- Wheel from sdist and installed without GPU dependencies: **208 pass, 401 skipped**.
+- **319 comparative configurations and 48 preparation configurations**: seven samples per
+  mode, without validation errors. Additional interleaved controls for tiling,
+  batching and solver bindings; before/after profiles with code origin.
+- Ruff and formatting pass. Wheel/sdist: `.artifacts/dist-remaining-suite`.
+- [Implementations, mixed results and remaining gaps](remaining-suite-results.md).
+  AMD/Intel hardware is not validated and the norm for extreme values is not yet resolved.
 
-## Etapa anterior: ejecución y staging Vulkan — 2026-09-06
+## Previous stage: Vulkan execution and staging — 2026-09-06
 
-- Suite CPU/OpenCL/Vulkan con backends GPU obligatorios: **530 pasan, 1 omitida**
-  por requerir dos dispositivos OpenCL. Incluye 118 pruebas Vulkan.
-- Wheel construido desde sdist e instalado sin dependencias GPU: **194 pasan,
-  320 omitidas** por ausencia de los backends opcionales.
-- Se repitieron **319 configuraciones**, siete rondas por modo, sin errores de
-  validación. Se añadieron controles de transferencias Vulkan con once muestras.
-- Ruff y formato pasan. Artefactos de distribución en `.artifacts/dist-vulkan-execution`.
-- Ver [cambios, resultados y límites](vulkan-execution-results.md). Hardware/SO es
-  un track secundario; la ruta implementada es portable y sigue validada solo en
-  la GPU NVIDIA y Windows locales.
+- CPU/OpenCL/Vulkan suite with GPU backends required: **530 pass, 1 skipped**
+  because two OpenCL devices are required. Includes 118 Vulkan tests.
+- Wheel built from sdist and installed without GPU dependencies: **194 pass,
+  320 skipped** for missing optional backends.
+- **319 configurations** repeated, seven rounds per mode, without validation
+  errors. Vulkan transfer controls with eleven samples were added.
+- Ruff and formatting pass. Distribution artifacts in `.artifacts/dist-vulkan-execution`.
+- See [changes, results and limits](vulkan-execution-results.md). Hardware/OS is
+  a secondary track; the implemented path is portable and remains validated only on
+  the local NVIDIA GPU and Windows.
 
-Las etapas siguientes conservan sus resultados históricos.
+Subsequent stages retain their historical results.
 
-## Etapa anterior: gaps y optimización — 2026-09-06
+## Previous stage: gaps and optimization — 2026-09-06
 
-- **518 pruebas pasan, 1 omitida**, con OpenCL y Vulkan obligatorios, CLBlast
-  nativo y adaptadores de benchmark. La omitida requiere dos dispositivos OpenCL.
-- **37 pruebas adicionales pasan** seleccionando CLBlast en la suite matricial:
-  broadcasting por lotes, productos irregulares y residuo de CG.
-- Wheel construido desde sdist e instalado sin dependencias GPU: **193 pasan,
-  309 omitidas** por ausencia esperada de backends opcionales.
-- Ruff y formato pasan. Wheel/sdist en `.artifacts/dist-gaps`.
-- **319 configuraciones de rendimiento**, siete rondas por cada modo, sin
-  errores de validación; además perfiles separados, eventos OpenCL, controles
-  de transferencias y sensibilidad al orden de ejecución.
-- CLBlast GEMV se prueba con destinos reciclados NaN/Inf; los solvers conservan
-  su frecuencia de chequeo. Se reprodujo y documentó por separado el gap numérico
-  preexistente de subdesbordamiento de normas.
+- **518 tests pass, 1 skipped**, with OpenCL and Vulkan required, native
+  CLBlast and benchmark adapters. The skipped test requires two OpenCL devices.
+- **37 additional tests pass** selecting CLBlast in the matrix suite:
+  batch broadcasting, irregular products and CG residual.
+- Wheel built from sdist and installed without GPU dependencies: **193 pass,
+  309 skipped** for the expected absence of optional backends.
+- Ruff and formatting pass. Wheel/sdist in `.artifacts/dist-gaps`.
+- **319 performance configurations**, seven rounds per mode, without
+  validation errors; also separate profiles, OpenCL events, transfer
+  controls and sensitivity to execution order.
+- CLBlast GEMV is tested with recycled NaN/Inf destinations; solvers retain
+  their check frequency. The preexisting numerical norm-underflow gap
+  was reproduced and documented separately.
 
-Ver [gaps, resultados y límites](gaps-and-optimization.md). AMD/Intel y la matriz
-de CI remota siguen pendientes. Las secciones siguientes son snapshots históricos.
+See [gaps, results and limits](gaps-and-optimization.md). AMD/Intel and the remote
+CI matrix remain pending. Subsequent sections are historical snapshots.
 
-## Primera implementación
+## First implementation
 
-Fecha: 2026-09-06. Windows 11, Python 3.12.14, NumPy 2.5.3,
-PyOpenCL 2026.1.4. Dispositivo OpenCL: NVIDIA GeForce RTX 5060 Ti,
-driver 616.64, precisión doble disponible.
+Date: 2026-09-06. Windows 11, Python 3.12.14, NumPy 2.5.3,
+PyOpenCL 2026.1.4. OpenCL device: NVIDIA GeForce RTX 5060 Ti,
+driver 616.64, double precision available.
 
-| Verificación | Resultado |
+| Verification | Result |
 | --- | --- |
-| Suite completa con OpenCL obligatorio | **140 pruebas pasan; 1 omitida** porque requiere dos dispositivos OpenCL físicos. |
-| Instalación limpia desde wheel, sin PyOpenCL | **73 pruebas pasan; 68 omitidas** por ausencia esperada de OpenCL. Se verificó que el import procede del paquete instalado, no de `src`. |
-| Ejemplo de migración con NumPy y GPU | Correcto; resultado de distancias `[2.2360678, 7.071068]`. |
-| Ejemplo de gradiente conjugado en GPU | Convergencia en 2 iteraciones; solución `[0.09090909, 0.6363636]`, residuo medido 0. |
-| Residencia de datos | Pruebas impiden descargas durante aritmética compatible; en los solvers solo se descargan escalares. |
-| Build | Wheel y sdist generados; wheel construido desde sdist. Se inspeccionó su contenido. |
-| Instalación editable | Correcta en `.venv`, con dependencias de desarrollo y OpenCL. |
-| Ruff | Lint y formato pasan. |
-| Dependencias | `pip check` sin incompatibilidades. |
-| Sintaxis Python 3.10 | Análisis sintáctico correcto; esto no sustituye ejecutar pruebas en Python 3.10. |
+| Full suite with OpenCL required | **140 tests pass; 1 skipped** because it requires two physical OpenCL devices. |
+| Clean installation from wheel, without PyOpenCL | **73 tests pass; 68 skipped** for the expected absence of OpenCL. Import was verified to come from the installed package, not `src`. |
+| Migration example with NumPy and GPU | Correct; distance result `[2.2360678, 7.071068]`. |
+| GPU conjugate-gradient example | Convergence in 2 iterations; solution `[0.09090909, 0.6363636]`, measured residual 0. |
+| Data residency | Tests prevent downloads during compatible arithmetic; solvers download only scalars. |
+| Build | Wheel and sdist generated; wheel built from sdist. Their contents were inspected. |
+| Editable installation | Correct in `.venv`, with development and OpenCL dependencies. |
+| Ruff | Lint and formatting pass. |
+| Dependencies | `pip check` without incompatibilities. |
+| Python 3.10 syntax | Successful parsing; this does not replace running tests on Python 3.10. |
 
-El compilador del driver NVIDIA emite un aviso sobre el atributo `noinline` de
-kernels compilados correctamente. La suite no suprime esos avisos. Se usó
-`PYOPENCL_NO_CACHE=1` durante la mayoría de las pruebas por las restricciones del
-entorno de ejecución; también se verificó la ejecución con la caché normal habilitada.
+The NVIDIA driver compiler emits a warning about the `noinline` attribute on
+successfully compiled kernels. The suite does not suppress those warnings.
+`PYOPENCL_NO_CACHE=1` was used during most tests due to runtime-environment
+restrictions; execution with the normal cache enabled was also verified.
 
-## Medición ilustrativa
+## Illustrative measurement
 
-Matrices 256×256, float32, semilla 47, 5 repeticiones, mediana de tiempo de pared.
-El tiempo OpenCL incluye despacho Python y sincronización, con inputs ya residentes;
-no incluye la compilación inicial ni transferencias. Los tres casos se validaron contra NumPy.
+256×256 matrices, float32, seed 47, 5 repetitions, median wall time.
+OpenCL time includes Python dispatch and synchronization, with already resident inputs;
+it excludes initial compilation and transfers. All three cases were validated against NumPy.
 
-| Operación | OpenCL residente | NumPy directo |
+| Operation | Resident OpenCL | Direct NumPy |
 | --- | ---: | ---: |
-| Suma elemento a elemento | 0.137 ms | 0.0155 ms |
-| Producto matricial | 0.129 ms | 0.191 ms |
-| Reducción sum | 0.136 ms | 0.0242 ms |
+| Elementwise sum | 0.137 ms | 0.0155 ms |
+| Matrix product | 0.129 ms | 0.191 ms |
+| Sum reduction | 0.136 ms | 0.0242 ms |
 
-La transferencia inicial de los dos inputs tomó aproximadamente 0.154 ms. La primera
-ejecución de cada operación, incluida compilación, tomó entre 61 y 112 ms. Estos
-resultados de una ejecución local no implican una ventaja universal, ni reproducen
-los experimentos del paper. Los archivos JSON y JUnit locales se conservaron en
-`.artifacts`, excluido únicamente de este checkout.
+Initial transfer of both inputs took approximately 0.154 ms. The first
+execution of each operation, including compilation, took between 61 and 112 ms. These
+results from one local run imply no universal advantage and do not reproduce
+the paper's experiments. Local JSON and JUnit files were retained in
+`.artifacts`, excluded only from this checkout.
 
-## Pendiente de comprobar
+## Still to be checked
 
-- GPUs AMD e Intel, un dispositivo sin fp64 y sistemas distintos de Windows.
-- Ejecución remota de la matriz CI y de PoCL: el workflow está preparado, no ejecutado aquí.
-- Rendimiento sostenido, mayores tamaños y condiciones numéricas adversas.
-- Compatibilidad de aplicaciones NumPy completas fuera del subconjunto documentado.
-- Vulkan está verificado en la GPU local; faltan otros fabricantes. No hay publicación en PyPI.
+- AMD and Intel GPUs, a device without fp64 and systems other than Windows.
+- Remote execution of the CI matrix and PoCL: the workflow is prepared, not run here.
+- Sustained performance, larger sizes and adversarial numerical conditions.
+- Compatibility of complete NumPy applications outside the documented subset.
+- Vulkan is verified on the local GPU; other vendors remain. There is no PyPI publication.
 
 
-## Compilador y Vulkan — 2026-09-06
+## Compiler and Vulkan — 2026-09-06
 
-Después de incorporar compile como función/decorador, planes cacheados y Vulkan:
+After incorporating compile as a function/decorator, cached plans and Vulkan:
 
-- Suite CPU/OpenCL/Vulkan y adaptadores de benchmark: **318 passed, 1 skipped**.
-  OpenCL y Vulkan obligatorios, CLBlast nativo habilitado. La prueba omitida requiere
-  dos dispositivos OpenCL; este equipo expone uno.
-- 65 pruebas Vulkan específicas, incluyendo API pública, captura y tres solvers
-  float32/64; 42 casos de compilador CPU/OpenCL (incluidos escalares 0-D).
-- Wheel instalado sin dependencias GPU: **122 passed, 186 skipped**.
-  Ejemplo `examples/compiled_numpy.py` validado en CPU, OpenCL y Vulkan; CLI
-  de descubrimiento Vulkan verificada.
-- Ruff y formato pasan; wheel y sdist construidos con `python -m build --no-isolation`.
-- 235 configuraciones de benchmark, 7 rondas residentes y 7 con transferencias,
-  sin errores. Incluyen cuBLAS, CuPy, nvmath-python y solvers hasta convergencia.
-  Ver [resultados y metodología](execution-results.md).
+- CPU/OpenCL/Vulkan suite and benchmark adapters: **318 passed, 1 skipped**.
+  OpenCL and Vulkan required, native CLBlast enabled. The skipped test requires
+  two OpenCL devices; this machine exposes one.
+- 65 specific Vulkan tests, including public API, capture and three float32/64
+  solvers; 42 CPU/OpenCL compiler cases (including 0-D scalars).
+- Wheel installed without GPU dependencies: **122 passed, 186 skipped**.
+  The `examples/compiled_numpy.py` example validated on CPU, OpenCL and Vulkan; Vulkan
+  discovery CLI verified.
+- Ruff and formatting pass; wheel and sdist built with `python -m build --no-isolation`.
+- 235 benchmark configurations, 7 resident rounds and 7 with transfers,
+  without errors. Includes cuBLAS, CuPy, nvmath-python and solvers to convergence.
+  See [results and methodology](execution-results.md).
 
-La arquitectura no promete NumPy completo; las limitaciones de
-[compile](compilation.md) y [Vulkan](vulkan.md) son parte del contrato.
-Las cifras históricas anteriores corresponden a etapas anteriores del runtime.
+The architecture does not promise full NumPy; the limits of
+[compile](compilation.md) and [Vulkan](vulkan.md) are part of the contract.
+Earlier historical figures correspond to earlier runtime stages.

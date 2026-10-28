@@ -1,170 +1,170 @@
-# Propuesta de arquitectura de ejecución
+# Execution architecture proposal
 
-Estado: **arquitectura aceptada; primera implementación**, 2026-09-06.
-La API `compile`, su decorador, planes reutilizables y el backend Vulkan ya están
-implementados. El resto de este documento conserva la arquitectura objetivo;
-no implica que todas sus optimizaciones o garantías futuras estén implementadas.
-Consulta [el contrato actual del compilador](compilation.md) y
-[el backend Vulkan](vulkan.md).
+Status: **accepted architecture; initial implementation**, 2026-09-06.
+The `compile` API, its decorator, reusable plans, and the Vulkan backend are
+already implemented. The rest of this document preserves the target architecture;
+it does not imply that all its optimizations or future guarantees are implemented.
+See [the current compiler contract](compilation.md) and
+[the Vulkan backend](vulkan.md).
 
-## Alcance y prioridades acordadas
+## Agreed scope and priorities
 
-El objetivo es abstraer kernels, dispatches, colas y memoria de GPU, conservando
-código NumPy reconocible en un subconjunto útil. **No se persigue compatibilidad
-100 % con NumPy.** Priorizamos frecuencia de uso en cálculo matricial, ganancia
-medida y coste de implementación. La CPU sigue disponible para entradas pequeñas;
-no se abandona su corrección ni se promete que una GPU gane por tamaño de datos.
+The goal is to abstract GPU kernels, dispatches, queues, and memory while preserving
+recognizable NumPy code within a useful subset. **100% NumPy compatibility is
+not a goal.** We prioritize frequency of use in matrix computation, measured gains,
+and implementation cost. The CPU remains available for small inputs;
+its correctness is preserved, and data size alone does not guarantee a GPU win.
 
-- Ahora: operaciones densas frecuentes, planes cacheados, fusión, reducciones,
-  productos, pasos iterativos, CLBlast y ejecución real OpenCL/Vulkan.
-- Después, según evidencia: GEMV/DOT optimizados, map-reduce fusionado, pooling y
-  fusión Vulkan, matmul por lotes y más operaciones de alto uso.
-- Sin prioridad inmediata: vistas mutables y aliasing completos, compilación
-  general de Python, compatibilidad de poco uso y mucha dificultad.
-- Deuda futura: dispersas y precondicionadores. CUDA está previsto como backend
-  posterior; hoy cuBLAS, CuPy y nvmath-python son referencias de benchmark.
+- Now: common dense operations, cached plans, fusion, reductions,
+  products, iterative steps, CLBlast, and actual OpenCL/Vulkan execution.
+- Later, as evidence warrants: optimized GEMV/DOT, fused map-reduce, pooling and
+  Vulkan fusion, batched matmul, and more frequently used operations.
+- No immediate priority: full mutable views and aliasing, general
+  Python compilation, and rarely used compatibility features that are hard to implement.
+- Future debt: sparse operations and preconditioners. CUDA is planned as a
+  later backend; today cuBLAS, CuPy, and nvmath-python are benchmark references.
 
-El usuario elige backend y dispositivo; optimizar no autoriza cambiarlos.
-CLBlast sigue siendo una implementación reemplazable de operaciones OpenCL.
+The user chooses the backend and device; optimization does not authorize changing them.
+CLBlast remains a replaceable implementation of OpenCL operations.
 
-## Decisión recomendada
+## Recommended decision
 
-Mantener una API con semántica NumPy y ejecución directa por defecto, apoyada en
-un registro único de operaciones. Añadir compilación opcional de funciones sobre
-una representación intermedia tipada, con planes reutilizables y fusión como
-optimización interna. El backend y dispositivo son elecciones del usuario.
+Keep an API with NumPy semantics and direct execution by default, backed by
+a single operation registry. Add optional function compilation over
+a typed intermediate representation, with reusable plans and fusion as an
+internal optimization. The backend and device are user choices.
 
-El grafo diferido vive dentro de una captura explícita, no como estado pendiente
-global de todos los arrays públicos. La salida de una función compilada vuelve
-a ser un array ordinario de OpenPacho, con su trabajo encolado. Encolar no equivale
-a esperar ni a descargarlo al host.
+The deferred graph lives within an explicit capture, rather than as global
+pending state for all public arrays. A compiled function's output is once again
+an ordinary OpenPacho array, with its work enqueued. Enqueuing does not mean
+waiting or downloading it to the host.
 
-La ejecución directa sigue siendo el camino de compatibilidad y depuración. El
-modo compilado acepta un subconjunto definido; no exige que toda función nueva
-tenga inmediatamente un kernel fusionado. Ambos comparten operaciones, reglas de
-tipos y backends; no son dos bibliotecas independientes.
+Direct execution remains the compatibility and debugging path. Compiled
+mode accepts a defined subset; it does not require every new function to have
+a fused kernel immediately. Both share operations, type rules, and
+backends; they are not two independent libraries.
 
-## Qué problema estamos resolviendo
+## The problem we are solving
 
-Eager, lazy y compilación no son tres alternativas del mismo nivel. Eager/lazy
-deciden cuándo ejecutar; la captura decide qué fragmento podemos analizar; la
-compilación produce un plan especializado; la fusión combina operaciones dentro
-de ese plan. La residencia y las transferencias son otra decisión del runtime.
+Eager execution, lazy execution, and compilation are not three alternatives at the same level. Eager/lazy
+determine when to execute; capture determines which portion we can analyze;
+compilation produces a specialized plan; fusion combines operations within
+that plan. Residency and transfers are another runtime decision.
 
-OpenPacho ya mantiene arrays en dispositivo entre llamadas eager. La transferencia
-no es una consecuencia inevitable de eager. Las mediciones muestran costes de
-asignación, despacho, trazado y sincronización además de las copias. Cambiar a
-lazy por sí solo tampoco elimina una lectura escalar exigida por Python.
+OpenPacho already keeps arrays on the device between eager calls. Transfer
+is not an inevitable consequence of eager execution. Measurements show allocation,
+dispatch, tracing, and synchronization costs in addition to copies. Switching to
+lazy execution alone does not eliminate a scalar read required by Python either.
 
-El decorador `fuse` original es un prototipo útil de captura y generación de código, pero
-traza la función de nuevo en cada llamada. Se almacena el programa OpenCL; no se
-reutiliza todavía un plan de función que evite el trazado. Además, se duplican
-algunas reglas entre `_array.py` y `_fusion.py`, y el generador conoce directamente
-expresiones OpenCL. Extender ese diseño por operación y fabricante multiplicaría
-el mantenimiento.
+The original `fuse` decorator is a useful capture and code-generation prototype, but
+it retraces the function on every call. The OpenCL program is cached; a function
+plan that avoids tracing is not yet reused. In addition, some rules are duplicated
+between `_array.py` and `_fusion.py`, and the generator directly knows
+OpenCL expressions. Extending that design by operation and vendor would multiply
+maintenance work.
 
-## Alternativas consideradas
+## Alternatives considered
 
-| Opción | Ventaja principal | Compromiso para este proyecto | Decisión |
+| Option | Main advantage | Tradeoff for this project | Decision |
 | --- | --- | --- | --- |
-| Solo eager | Flujo Python natural y errores fáciles de localizar | Poco contexto para optimizar varias operaciones juntas | Conservar como base, insuficiente como única estrategia |
-| Solo `fuse` elemento a elemento | Implementación pequeña y ganancias rápidas | Se queda corto para reducciones, álgebra y planes iterativos | Conservar compatibilidad, convertirlo en consumidor del núcleo común |
-| Lazy automático global | Fusiona entre líneas y funciones sin envolverlas | Vistas, escrituras, observaciones, memoria retenida y tiempos de error exigen un runtime más complejo | No adoptarlo por defecto |
-| Contexto lazy acotado | Amplía la captura sin compilar Python arbitrario | Sigue trazando el cuerpo; necesita contratos de efectos, salidas y límites del grafo | Posible experimento posterior sobre el mismo IR, no otra API inicial |
-| Compilación opcional de funciones | Planes reutilizables y optimización de varias clases de operaciones | Debe definir qué Python captura y qué no | Camino recomendado |
-| Compilador general de Python con reanudación tras cortes | Puede preservar más flujo Python automáticamente | Infraestructura de captura, guards, efectos y compatibilidad con CPython muy costosa | No construirlo en esta etapa |
+| Eager only | Natural Python flow and easily located errors | Little context for optimizing multiple operations together | Keep as the foundation; insufficient as the sole strategy |
+| Elementwise `fuse` only | Small implementation and quick gains | Falls short for reductions, algebra, and iterative plans | Preserve compatibility; make it a consumer of the shared core |
+| Global automatic lazy execution | Fuses across lines and functions without wrapping them | Views, writes, observations, retained memory, and error timing require a more complex runtime | Do not adopt by default |
+| Bounded lazy context | Extends capture without compiling arbitrary Python | Still traces the body; needs contracts for effects, outputs, and graph boundaries | Possible later experiment on the same IR, not another initial API |
+| Optional function compilation | Reusable plans and optimization across several operation classes | Must define which Python constructs it captures | Recommended path |
+| General Python compiler with resumption after breaks | Can automatically preserve more Python flow | Very costly capture, guard, effect, and CPython compatibility infrastructure | Do not build at this stage |
 
-ArrayFire demuestra que la fusión lazy entre llamadas es viable; no es un modelo
-incorrecto. Su JIT agrega operaciones y evalúa al pedirlo o al llegar a una
-operación no cubierta. Para OpenPacho, elegir ese modelo como contrato público
-trasladaría buena parte del esfuerzo a preservar la semántica de arrays mutables.
-[Documentación de ArrayFire](https://arrayfire.org/docs/jit.htm).
+ArrayFire demonstrates that lazy fusion across calls is viable; it is not an
+incorrect model. Its JIT aggregates operations and evaluates on request or when
+it reaches an unsupported operation. For OpenPacho, choosing that model as the
+public contract would shift much of the effort toward preserving mutable-array semantics.
+[ArrayFire documentation](https://arrayfire.org/docs/jit.htm).
 
-JAX demuestra el valor de una representación de primitivas y funciones compiladas,
-pero sus transformaciones se diseñan para funciones puras y su control de flujo
-trazado tiene restricciones. Adoptar esa infraestructura como inspiración no
-implica adoptar sus diferencias de API respecto a NumPy.
-[JIT de JAX](https://docs.jax.dev/en/latest/jit-compilation.html).
+JAX demonstrates the value of a representation based on primitives and compiled functions,
+but its transformations are designed for pure functions and its traced control
+flow has restrictions. Taking inspiration from that infrastructure does not
+imply adopting its API differences from NumPy.
+[JAX JIT](https://docs.jax.dev/en/latest/jit-compilation.html).
 
-## Contrato de intercambiabilidad
+## Interchangeability contract
 
-Intercambiabilidad significa tres cosas distintas que deben probarse por separado:
+Interchangeability means three distinct things that must be tested separately:
 
-1. **Expresiones:** operadores y funciones compatibles se escriben igual.
-2. **Comportamiento:** formas, tipos, broadcasting, valores, vistas y escrituras
-   respetan el contrato anunciado. Conservar una firma no basta.
-3. **Integración:** una dependencia acepta el objeto array y sus protocolos.
-   Una extensión que exige memoria NumPy en CPU no se convierte automáticamente
-   en una función GPU por añadir un compilador.
+1. **Expressions:** compatible operators and functions are written the same way.
+2. **Behavior:** shapes, types, broadcasting, values, views, and writes
+   follow the advertised contract. Preserving a signature is not enough.
+3. **Integration:** a dependency accepts the array object and its protocols.
+   An extension that requires NumPy memory on the CPU does not automatically
+   become a GPU function by adding a compiler.
 
-Se conservan `__array_ufunc__` y `__array_function__`. Se propone añadir
-`__array_namespace__` y una cobertura comprobada del Array API para código nuevo
-que ya use ese protocolo. Ese estándar complementa el contrato NumPy; no cubre
-por sí solo todo NumPy ni elimina las fronteras de transferencia.
-[Despacho NumPy](https://numpy.org/doc/stable/user/basics.dispatch.html),
-[Array API en NumPy](https://numpy.org/doc/stable/reference/array_api.html).
+`__array_ufunc__` and `__array_function__` are retained. Adding
+`__array_namespace__` and verified Array API coverage is proposed for new code
+that already uses that protocol. That standard complements the NumPy contract;
+it does not cover all of NumPy on its own or remove transfer boundaries.
+[NumPy dispatch](https://numpy.org/doc/stable/user/basics.dispatch.html),
+[Array API in NumPy](https://numpy.org/doc/stable/reference/array_api.html).
 
-Para acercarnos al flujo Python de NumPy, las conversiones a un valor Python
-(`bool`, `float`, `int`) deberían seguir sus reglas cuando sean válidas. En GPU
-esa observación solicitada por el programa necesita sincronización y lectura
-del valor; debe aparecer en el perfil de ejecución. No es un cambio de backend.
-Esto supone evolucionar el rechazo actual de toda conversión booleana, con
-pruebas de los casos válidos y ambiguos. La conversión implícita de un array
-completo mediante `np.asarray` seguiría siendo una frontera distinta y rechazada:
-se usa `asnumpy` cuando realmente se necesita memoria CPU.
+To approach NumPy's Python workflow, conversions to a Python value
+(`bool`, `float`, `int`) should follow its rules when valid. On the GPU,
+that observation requested by the program requires synchronization and reading
+the value; it must appear in the execution profile. It is not a backend change.
+This requires evolving the current rejection of all Boolean conversions, with
+tests for valid and ambiguous cases. Implicit conversion of an entire array
+through `np.asarray` would remain a separate, rejected boundary:
+use `asnumpy` when CPU memory is actually needed.
 
-Ejemplo de API **implementada**, sin cambiar el cuerpo de la función:
+Example of the **implemented** API, without changing the function body:
 
 ```python
 import numpy as np
 import openpacho as pacho
 
 
-def energia(a, b, c):
+def energy(a, b, c):
     x = a * b + c
     y = 2 * x
     return np.sum(y * y, axis=-1)
 
 
-# Camino original, con arrays NumPy.
-cpu = energia(a_host, b_host, c_host)
+# Original path, with NumPy arrays.
+cpu = energy(a_host, b_host, c_host)
 
-# La optimización se aplica desde fuera del algoritmo.
-energia_compilada = pacho.compile(energia)
+# Optimization is applied from outside the algorithm.
+compiled_energy = pacho.compile(energy)
 with pacho.use_backend("opencl"):
     a = pacho.asarray(a_host)
     b = pacho.asarray(b_host)
     c = pacho.asarray(c_host)
-    gpu = energia_compilada(a, b, c)
-    resultado = pacho.asnumpy(gpu)
+    gpu = compiled_energy(a, b, c)
+    result = pacho.asnumpy(gpu)
 ```
 
-También se admiten `@pacho.compile` y `@pacho.compile()`:
+`@pacho.compile` and `@pacho.compile()` are also supported:
 
 ```python
 @pacho.compile
-def energia(a, b, c):
+def energy(a, b, c):
     x = a * b + c
     y = 2 * x
     return np.sum(y * y, axis=-1)
 ```
 
-Las tres formas usan el mismo compilador. Con inputs NumPy, el decorador ejecuta
-la función original; con arrays OpenPacho, usa su backend y un plan cacheado.
+All three forms use the same compiler. With NumPy inputs, the decorator runs
+the original function; with OpenPacho arrays, it uses their backend and a cached plan.
 
-El `return` delimita el plan compilado; las asignaciones `x` e `y` no lo delimitan.
-La reducción puede requerir varios kernels. Una función compilada no promete
-un solo kernel. Si se devuelven `x` e `y`, ambos son resultados observables y el
-plan debe producirlos, aunque pueda compartir trabajo.
+The `return` bounds the compiled plan; assignments to `x` and `y` do not.
+The reduction may require multiple kernels. A compiled function does not promise
+a single kernel. If `x` and `y` are returned, both are observable results and the
+plan must produce them, although it may share work.
 
-Los creadores NumPy sin argumentos array no siempre pasan por protocolos de
-despacho. Su soporte dentro de una captura necesita reglas explícitas; no se
-promete que cualquier llamada `np.*` funcione en GPU. Para constructores internos
-portables se podrá usar el namespace del array o funciones como `zeros_like`.
+NumPy constructors without array arguments do not always go through dispatch
+protocols. Supporting them within a capture requires explicit rules;
+there is no promise that any `np.*` call will work on the GPU. For portable internal
+constructors, the array namespace or functions such as `zeros_like` could be used.
 
-## Por qué no hacer todos los arrays lazy
+## Why not make all arrays lazy
 
-Considérese este contrato NumPy, aunque OpenPacho todavía no implemente escrituras:
+Consider this NumPy contract, even though OpenPacho does not yet implement writes:
 
 ```python
 x = a * b + c
@@ -172,176 +172,176 @@ a[:] = 0
 y = 2 * x
 ```
 
-`x` debe conservar el resultado calculado con el valor anterior de `a`. Un grafo
-que conserve una referencia al mismo almacenamiento mutable y lo lea al final
-produciría otro resultado. Se puede resolver con versiones de almacenamiento,
-dependencias de escritura, materialización o copias, pero no ignorarlo.
+`x` must preserve the result computed with the previous value of `a`. A graph
+that retains a reference to the same mutable storage and reads it at the end
+would produce a different result. Storage versioning, write dependencies,
+materialization, or copies can solve this, but it cannot be ignored.
 
-Las vistas también importan: `v = a[:, 0]` comparte datos en NumPy, mientras el
-slicing actual de OpenPacho copia. Antes de prometer más compatibilidad hay que
-definir un descriptor de almacenamiento con forma, strides, offset, identidad
-compartida, permisos y dependencias. La futura semántica pública puede ser mutable
-aunque los valores internos del IR se representen de forma inmutable.
-[Copias y vistas de NumPy](https://numpy.org/doc/stable/user/basics.copies.html).
+Views also matter: `v = a[:, 0]` shares data in NumPy, whereas
+OpenPacho's current slicing copies. Before promising more compatibility, a
+storage descriptor must be defined with shape, strides, offset, shared identity,
+permissions, and dependencies. Future public semantics may be mutable
+even if internal IR values are represented immutably.
+[NumPy copies and views](https://numpy.org/doc/stable/user/basics.copies.html).
 
-Lazy global también debe controlar la memoria retenida por grafos largos, cuándo
-se reportan errores y qué valores deben conservarse al ejecutar solo parte del
-grafo. Un límite de tamaño resuelve crecimiento, pero no el contrato de aliasing.
-Por eso lo pospondría hasta tener el modelo de almacenamiento y efectos probado.
+Global lazy execution must also control the memory retained by long graphs, when
+errors are reported, and which values must survive when only part of the graph
+is executed. A size limit handles growth, but not the aliasing contract.
+That is why I would postpone it until the storage and effect model has been tested.
 
-## Núcleo común y responsabilidades
+## Shared core and responsibilities
 
 ```mermaid
 flowchart TD
-    A[API NumPy y protocolos] --> B[Registro de operaciones tipadas]
-    B --> C[Ejecución directa]
-    B --> D[Captura de función]
-    D --> E[IR y optimizador]
-    E --> F[Plan de ejecución y memoria]
-    C --> G[Backend elegido por el usuario]
+    A[NumPy API and protocols] --> B[Typed operation registry]
+    B --> C[Direct execution]
+    B --> D[Function capture]
+    D --> E[IR and optimizer]
+    E --> F[Execution and memory plan]
+    C --> G[Backend chosen by the user]
     F --> G
-    G --> H[Kernels propios y bibliotecas del backend]
+    G --> H[Custom kernels and backend libraries]
 ```
 
-**Registro de operaciones.** Cada primitiva define inferencia de forma/dtype,
-promoción de escalares débiles de NumPy 2, validación, aliasing/efectos y semántica.
-Puede declarar descomposición en otras primitivas, una implementación directa y
-reglas de generación de código. La ruta eager usa ese contrato sin construir un
-grafo de función por cada suma; el coste fijo debe medirse y mantenerse pequeño.
+**Operation registry.** Each primitive defines shape/dtype inference,
+NumPy 2 weak-scalar promotion, validation, aliasing/effects, and semantics.
+It may declare a decomposition into other primitives, a direct implementation,
+and code-generation rules. The eager path uses this contract without building a
+function graph for every addition; the fixed cost must be measured and kept small.
 
-**IR tipado.** Nodos independientes de OpenCL: operaciones elemento a elemento,
-reducciones, productos, vistas, lectura/escritura y llamadas opacas conocidas.
-Representa múltiples salidas, dependencias de efectos y constantes frente a
-argumentos dinámicos. Sus interfaces deben admitir regiones de control de flujo
-futuras sin fingir que ya podemos capturar cualquier `while` de Python.
+**Typed IR.** OpenCL-independent nodes: elementwise operations,
+reductions, products, views, reads/writes, and known opaque calls.
+It represents multiple outputs, effect dependencies, and constants versus
+dynamic arguments. Its interfaces must allow future control-flow regions
+without pretending that any Python `while` can already be captured.
 
-**Optimizador.** Elimina trabajo muerto cuando es semánticamente válido, comparte
-expresiones puras y particiona el grafo en grupos fusionables. Puede fusionar una
-expresión con una reducción, mantener una llamada BLAS y reusar almacenamiento
-de temporales cuya vida terminó. No debe reasociar flotantes o bajar precisión
-sin una política explícita. Reusar memoria no permite sobrescribir inputs o
-salidas todavía observables.
+**Optimizer.** Eliminates dead work when semantically valid, shares
+pure expressions, and partitions the graph into fusible groups. It can fuse an
+expression with a reduction, retain a BLAS call, and reuse storage
+for temporaries whose lifetimes have ended. It must not reassociate floating-point
+operations or reduce precision without an explicit policy. Memory reuse does not
+allow overwriting inputs or outputs that are still observable.
 
-**Plan de ejecución.** Contiene argumentos, buffers temporales, kernels, llamadas
-externas y dependencias. Se instancia por invocación para que llamadas concurrentes
-no compartan temporales vivos. Evita retrazar Python al reutilizarlo. Inicialmente
-puede ejecutarse desde Python; un ejecutor nativo o grabación de comandos sería
-una mejora posterior según capacidades, no un requisito universal del backend.
+**Execution plan.** Contains arguments, temporary buffers, kernels, external
+calls, and dependencies. It is instantiated per invocation so concurrent calls
+do not share live temporaries. Reuse avoids retracing Python. Initially,
+it can execute from Python; a native executor or command recording would be
+a later improvement according to capabilities, not a universal backend requirement.
 
-**Backend.** Describe capacidades reales por operación, dtype y layout, administra
-colas/memoria y ejecuta los pasos. OpenCL/Vulkan/CUDA son destinos distintos;
-añadir uno requiere implementar sus primitivas o descomposiciones, no solo un
-traductor textual. El IR y los algoritmos de alto nivel se reutilizan. CPU
-puede comenzar ejecutando primitivas NumPy; compilar un grafo en ese backend no
-promete por sí solo mejorar NumPy.
+**Backend.** Describes actual capabilities by operation, dtype, and layout, manages
+queues/memory, and executes the steps. OpenCL/Vulkan/CUDA are distinct targets;
+adding one requires implementing its primitives or decompositions, not merely a
+textual translator. The IR and high-level algorithms are reused. The CPU
+can begin by executing NumPy primitives; compiling a graph on that backend
+does not by itself promise to improve on NumPy.
 
-Se deben separar tres conceptos: backend/dispositivo, modo de ejecución y
-proveedor de una operación. CLBlast no es un dispositivo. En la arquitectura
-objetivo, cambiar `custom` por `clblast` debería cambiar la política del plan sin
-crear un contexto incompatible ni copiar arrays que ya están en la misma GPU.
-Esto requiere separar la identidad del contexto de la política BLAS; la versión
-actual aún crea objetos/contextos distintos por configuración.
+Three concepts must be separated: backend/device, execution mode, and
+operation provider. CLBlast is not a device. In the target architecture,
+changing `custom` to `clblast` should change the plan policy without
+creating an incompatible context or copying arrays already on the same GPU.
+This requires separating context identity from BLAS policy; the current
+version still creates distinct objects/contexts for each configuration.
 
-## CLBlast y kernels propios
+## CLBlast and custom kernels
 
-CLBlast es una implementación de operaciones del backend OpenCL, no el contrato
-del IR ni el único camino de álgebra. El IR conserva una operación `matmul`;
-su plan puede llamar a CLBlast o a un kernel propio según la política explícita.
+CLBlast is an implementation of OpenCL backend operations, not the IR
+contract or the only algebra path. The IR retains a `matmul` operation;
+its plan can call CLBlast or a custom kernel according to the explicit policy.
 
-Una llamada CLBlast es normalmente una frontera de fusión. Sin embargo, una
-operación BLAS ya puede expresar ciertos patrones (por ejemplo, los parámetros
-alpha/beta de GEMM). Solo se sustituye un patrón por esa operación si se respetan
-tipos, redondeo, aliasing y efectos definidos. Un kernel específico puede combinar
-más pasos cuando resulte útil. Ambas implementaciones comparten pruebas y
-benchmarks. La selección interna de una implementación no cambia el dispositivo.
+A CLBlast call is normally a fusion boundary. However, a BLAS operation
+can already express certain patterns (for example, GEMM's alpha/beta parameters).
+A pattern is replaced with that operation only if the defined types, rounding,
+aliasing, and effects are respected. A dedicated kernel can combine
+more steps when useful. Both implementations share tests and
+benchmarks. Internal implementation selection does not change the device.
 
-Se conserva el control `custom`/`clblast` para comparar. Cualquier futura selección
-automática de kernels dentro del backend debe ser inspeccionable y anulable; no
-autoriza migración automática a CPU/CUDA ni cambios de precisión.
+The `custom`/`clblast` control is retained for comparison. Any future automatic
+kernel selection within the backend must be inspectable and overridable; it does
+not authorize automatic migration to CPU/CUDA or precision changes.
 
-## Contrato del primer compilador
+## First compiler contract
 
-- Captura inicial: funciones numéricas puras, formas estáticas por especialización,
-  argumentos array/scalar y varias salidas. No se exige un único kernel.
-- Cachear **planes**, además de kernels. Las claves y guards consideran función,
-  metadatos relevantes, layout, dtype, escalares estáticos declarados, backend,
-  dispositivo/capacidades, opciones numéricas y versiones que invalidan el binario.
-- Los escalares dinámicos y buffers se enlazan en cada llamada. No se cachean
-  valores de datos ni direcciones como sustituto de argumentos. Las capturas
-  mutables se pasan explícitamente o se rechazan; no se congelan silenciosamente.
-- Cambios de forma o argumentos estáticos pueden crear otra variante, con límites
-  de caché y diagnósticos. Primero se soportan formas concretas; polimorfismo de
-  formas queda para después de medir la recompilación real.
-- Una primitiva conocida sin regla de fusión puede ejecutarse como una llamada
-  individual del mismo backend dentro del plan. No equivale a ejecutar Python
-  arbitrario fuera de la captura.
-- Python no capturable, mutación aún no soportada y lecturas host dentro de la
-  función producen un error de compilación identificable. El usuario conserva la
-  función original para ejecutarla de forma directa. No se vuelve a ejecutar
-  automáticamente un cuerpo que pudo haber realizado efectos durante el trazado.
-- La función compilada admite solo las garantías de pureza documentadas; el
-  trazado por sobrecarga no puede detectar todo efecto Python. Las pruebas y los
-  diagnósticos no deben presentarlo como un verificador completo de pureza.
-- Los errores de compilación/dispositivo y sus ubicaciones deben ser visibles.
-  Un método de inspección debería mostrar grupos fusionados, BLAS, buffers,
-  puntos de sincronización y motivos de especialización.
+- Initial capture: pure numerical functions, static shapes per specialization,
+  array/scalar arguments, and multiple outputs. A single kernel is not required.
+- Cache **plans** in addition to kernels. Keys and guards account for the function,
+  relevant metadata, layout, dtype, declared static scalars, backend,
+  device/capabilities, numerical options, and versions that invalidate the binary.
+- Dynamic scalars and buffers are bound on each call. Data values and
+  addresses are not cached as substitutes for arguments. Mutable captures
+  are passed explicitly or rejected; they are not silently frozen.
+- Shape or static-argument changes may create another variant, with cache
+  limits and diagnostics. Concrete shapes are supported first; shape
+  polymorphism is deferred until actual recompilation has been measured.
+- A known primitive without a fusion rule can execute as an individual
+  call on the same backend within the plan. This is not equivalent to running
+  arbitrary Python outside capture.
+- Uncapturable Python, mutation that is not yet supported, and host reads within
+  the function produce an identifiable compilation error. The user retains the
+  original function for direct execution. A body that may have performed effects
+  during tracing is not automatically reexecuted.
+- The compiled function supports only the documented purity guarantees;
+  tracing through overloading cannot detect every Python effect. Tests and
+  diagnostics must not present it as a complete purity verifier.
+- Compilation/device errors and their locations must be visible.
+  An inspection method should show fused groups, BLAS, buffers,
+  synchronization points, and specialization reasons.
 
-PyTorch logra continuar tras Python no capturable mediante cortes del grafo y
-reanudación. Es una posibilidad futura, pero exige infraestructura adicional de
-captura de Python; no aparece gratis por implementar un DAG de arrays.
-[Graph breaks en PyTorch](https://docs.pytorch.org/docs/main/user_guide/torch_compiler/compile/programming_model.graph_breaks_index.html).
+PyTorch can continue after uncapturable Python through graph breaks and
+resumption. This is a future possibility, but requires additional Python capture
+infrastructure; it does not come for free from implementing an array DAG.
+[PyTorch graph breaks](https://docs.pytorch.org/docs/main/user_guide/torch_compiler/compile/programming_model.graph_breaks_index.html).
 
-## Solvers y control de flujo
+## Solvers and control flow
 
-El primer objetivo de compilación en solvers debe ser el cuerpo de la iteración.
-La decisión de parada puede seguir en Python y comprobarse con la misma frecuencia.
-Una condición Python sobre un escalar GPU sigue necesitando sincronización.
+The first compilation target for solvers should be the iteration body.
+The stopping decision can remain in Python and be checked at the same frequency.
+A Python condition on a GPU scalar still requires synchronization.
 
-Mover un bucle completo requiere representar su estado, condiciones, orden de
-efectos y diagnóstico de convergencia. No basta con fusionar cien expresiones ni
-desenrollar sin límite un bucle al trazarlo. Un bucle con dimensiones estáticas y
-número de iteraciones acotado puede tener otras estrategias, pero debe evaluarse
-sin cambiar tolerancias o frecuencia de parada a espaldas del usuario.
+Moving a complete loop requires representing its state, conditions, effect order,
+and convergence diagnostics. Fusing a hundred expressions or unrolling
+a loop without limit during tracing is not enough. A loop with static dimensions
+and a bounded iteration count may allow other strategies, but must be evaluated
+without changing tolerances or the stopping-check frequency behind the user's back.
 
-Mantener control de flujo Python en el camino directo preserva más código NumPy.
-Las restricciones del compilador son optativas y locales. No se propone exigir
-una API de actualización funcional tipo `.at[...]` a todos los usuarios.
-[Mutación y control de flujo en JAX](https://docs.jax.dev/en/latest/notebooks/Common_Gotchas_in_JAX.html).
+Keeping Python control flow in the direct path preserves more NumPy code.
+Compiler restrictions are optional and local. Requiring a functional update
+API such as `.at[...]` for all users is not proposed.
+[JAX mutation and control flow](https://docs.jax.dev/en/latest/notebooks/Common_Gotchas_in_JAX.html).
 
-## Orden de implementación y criterios de avance
+## Implementation order and advancement criteria
 
-1. **Contrato y modelo de datos:** fijar el subconjunto de tipos, formas,
-   observaciones host y errores. Posponer vistas mutables y escrituras complejas. Mantener explícitas las diferencias
-   actuales; no declarar resuelto el slicing por documentación.
-2. **Registro único e IR:** trasladar reglas compartidas de `_array.py` y
-   `_fusion.py`, con pruebas de conformidad y medidas del coste eager. Hacer que
-   `fuse` use el mismo núcleo sin romper sus llamadas existentes.
-3. **Planes compilados reutilizables:** `compile(f)` y decoradores, salidas múltiples,
-   captura de expresiones/reducciones/álgebra y límites claros de pureza. Un
-   producto puede seguir siendo BLAS aunque lo rodeen kernels fusionados.
-4. **Optimización guiada por medidas:** map-reduce, gestión de temporales,
-   GEMV/DOT, cuerpos de iteración y posterior ejecutor nativo si Python domina.
-5. **Extensión:** más operaciones, dtypes y layouts con capacidades comprobadas;
-   segundo fabricante real antes de prometer portabilidad de rendimiento. Nuevos
-   backends se conectan al mismo contrato. Sparse/precondicionadores siguen como deuda.
+1. **Contract and data model:** establish the subset of types, shapes,
+   host observations, and errors. Postpone mutable views and complex writes. Keep
+   current differences explicit; documentation alone does not resolve slicing.
+2. **Single registry and IR:** move shared rules from `_array.py` and
+   `_fusion.py`, with conformance tests and eager-cost measurements. Make
+   `fuse` use the same core without breaking existing calls.
+3. **Reusable compiled plans:** `compile(f)` and decorators, multiple outputs,
+   capture of expressions/reductions/algebra, and clear purity limits. A
+   product can remain BLAS even with fused kernels around it.
+4. **Measurement-driven optimization:** map-reduce, temporary management,
+   GEMV/DOT, iteration bodies, and a later native executor if Python dominates.
+5. **Extension:** more operations, dtypes, and layouts with verified capabilities;
+   a real second vendor before promising performance portability. New
+   backends connect to the same contract. Sparse operations/preconditioners remain debt.
 
-Para añadir una operación: definir y probar semántica una vez; aportar ejecución
-en los backends anunciados o descomposición válida; luego añadir optimizaciones
-opcionales. Una función nueva no debería exigir modificar manualmente cada tracer.
+To add an operation: define and test semantics once; provide execution
+on the advertised backends or a valid decomposition; then add optional
+optimizations. A new function should not require manually changing every tracer.
 
-Los criterios de aceptación incluyen comparar función NumPy/directa/compilada,
-tipos mixtos, escalares que cambian entre llamadas, layouts, salidas múltiples,
-inputs reutilizados, aliasing/escrituras cuando se soporten, errores y concurrencia.
-Los benchmarks deben separar captura/compilación fría, plan caliente, transferencias,
-memoria máxima y bucles con convergencia. Una mejora no se valida solo contando
-menos kernels ni permitiendo una precisión distinta.
+Acceptance criteria include comparing the NumPy/direct/compiled function,
+mixed types, scalars that change between calls, layouts, multiple outputs,
+reused inputs, aliasing/writes when supported, errors, and concurrency.
+Benchmarks must separate cold capture/compilation, warm plans, transfers,
+peak memory, and convergence loops. A gain is not validated merely by counting
+fewer kernels or allowing different precision.
 
-## Fuera de esta decisión
+## Outside this decision
 
-No se promete compilar Python arbitrario, interoperabilidad binaria universal con
-SciPy/pandas, autodiferenciación ni sistemas distribuidos. Vulkan sí forma parte
-de esta etapa; un backend CUDA queda para más adelante.
-MLIR/XLA u otro compilador podrían evaluarse detrás del IR si sus destinos y coste
-de distribución encajan; no se escogen aquí como dependencia obligatoria. El
-primer objetivo es fijar un contrato de operaciones y planes suficientemente
-pequeño y comprobable, evitando reinventar un compilador general de Python.
+There is no promise of arbitrary Python compilation, universal binary interoperability
+with SciPy/pandas, automatic differentiation, or distributed systems. Vulkan is part
+of this stage; a CUDA backend is deferred.
+MLIR/XLA or another compiler could be evaluated behind the IR if its targets and
+distribution cost fit; none is selected here as a mandatory dependency. The
+first goal is to establish a sufficiently small, testable contract for operations
+and plans, avoiding the reinvention of a general Python compiler.

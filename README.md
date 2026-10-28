@@ -1,22 +1,22 @@
 # OpenPacho
 
-**Arrays en GPU independientes del fabricante, con una API familiar para quien usa NumPy.**
+**Vendor-independent GPU arrays with a familiar API for NumPy users.**
 
-OpenPacho retoma la idea de operaciones numéricas paralelas en GPU explorada en
-PyPacho, con una implementación nueva. OpenCL y Vulkan son motores
-de GPU seleccionables: no necesitan CUDA. NumPy es el
-motor de CPU y la referencia de comportamiento. Versión **0.1.0a1**, experimental.
-También existe un [backend CUDA inicial](docs/cuda.md) para NVIDIA, con alcance
-menor que OpenCL/Vulkan y proveedores cuBLAS/custom seleccionables.
+OpenPacho revisits the idea of parallel numerical operations on GPUs explored in
+PyPacho, with a new implementation. OpenCL and Vulkan are selectable GPU
+backends that do not require CUDA. NumPy is the CPU backend and the behavioral
+reference. Version **0.1.0a1**, experimental.
+An [initial CUDA backend](docs/cuda.md) is also available for NVIDIA, with a
+narrower scope than OpenCL/Vulkan and selectable cuBLAS/custom providers.
 
-Consulta la [incorporación de normas estables CUDA](docs/cuda-norm-results.md), las
-[tres iteraciones de kernels y layouts](docs/three-iterations-results.md) y el
-[camino a la primera versión estable](docs/release-readiness.md), con criterios
-de salida y límites de la validación actual.
+See the [addition of stable CUDA norms](docs/cuda-norm-results.md), the
+[three kernel and layout iterations](docs/three-iterations-results.md), and the
+[path to the first stable release](docs/release-readiness.md), including exit
+criteria and the limits of current validation.
 
-## Instalar
+## Install
 
-Requiere Python 3.10 o posterior. Desde este repositorio:
+Requires Python 3.10 or later. From this repository:
 
 ```sh
 python -m venv .venv
@@ -27,48 +27,49 @@ python -m pip install ".[opencl]"
 pacho devices
 ```
 
-El paquete todavía no está publicado en PyPI. Para CPU basta `python -m pip install .`.
-Para contribuir: `python -m pip install -e ".[opencl,dev,benchmark]"`.
-Los extras `opencl`, `vulkan` y `cuda` son independientes y combinables:
-`python -m pip install ".[opencl,vulkan]"` no instala CUDA. La distribución se llama
-`open-pacho` y el import `openpacho`; cuando se publique, el equivalente será
-`python -m pip install "open-pacho[opencl]"`.
+The package is not yet published on PyPI. For CPU use, `python -m pip install .` is sufficient.
+To contribute: `python -m pip install -e ".[opencl,dev,benchmark]"`.
+The `opencl`, `vulkan`, and `cuda` extras are independent and can be combined:
+`python -m pip install ".[opencl,vulkan]"` does not install CUDA. The distribution
+is named `open-pacho` and the import is `openpacho`; once published, the equivalent
+command will be `python -m pip install "open-pacho[opencl]"`.
 
-OpenCL requiere el controlador/runtime del fabricante además de PyOpenCL. Los
-dispositivos disponibles dependen del sistema: NVIDIA, AMD, Intel y otros proveedores
-pueden exponer OpenCL; no se presupone que todo equipo lo tenga. En dispositivos
-sin doble precisión, usa `dtype=pacho.float32`: **nunca se reduce la precisión sin avisar**.
-Consulta la [instalación de PyOpenCL](https://documen.tician.de/pyopencl/misc.html#installation).
+OpenCL requires the vendor's driver/runtime in addition to PyOpenCL. Available
+devices depend on the system: NVIDIA, AMD, Intel, and other vendors may expose
+OpenCL; its availability is not assumed on every machine. On devices without
+double precision, use `dtype=pacho.float32`: **precision is never silently reduced**.
+See the [PyOpenCL installation guide](https://documen.tician.de/pyopencl/misc.html#installation).
 
-Para Vulkan: `python -m pip install ".[vulkan]"`, un controlador Vulkan y un
-compilador GLSL/SPIR-V; consulta [instalación y límites](docs/vulkan.md).
+For Vulkan: `python -m pip install ".[vulkan]"`, a Vulkan driver, and a GLSL/SPIR-V
+compiler; see [installation and limitations](docs/vulkan.md).
 
-Para CUDA inicial: `python -m pip install ".[cuda]"` y un driver NVIDIA compatible
-con CUDA 13. Usa `pacho devices --backend cuda`; consulta el [alcance CUDA](docs/cuda.md).
+For the initial CUDA backend: `python -m pip install ".[cuda]"` and an NVIDIA
+driver compatible with CUDA 13. Run `pacho devices --backend cuda`; see the
+[CUDA scope](docs/cuda.md).
 
-## Migrar una función NumPy
+## Migrate a NumPy function
 
-Puedes conservar NumPy dentro de funciones existentes. Los protocolos de despacho
-de NumPy dirigen las operaciones compatibles a OpenPacho:
+You can keep NumPy inside existing functions. NumPy's dispatch protocols route
+supported operations to OpenPacho:
 
 ```python
 import numpy as np
 import openpacho as pacho
 
 
-def distancias(a, b):
+def distances(a, b):
     return np.sqrt(np.sum((a - b) ** 2, axis=1))
 
 
 with pacho.use_backend("opencl"):
     a = pacho.asarray([[1, 2, 3], [4, 5, 6]], dtype=pacho.float32)
     b = pacho.asarray([1, 1, 1], dtype=pacho.float32)
-    resultado = distancias(a, b)  # las operaciones permanecen en GPU
-    print(resultado.device)
-    print(pacho.asnumpy(resultado))  # transferencia explícita al final
+    result = distances(a, b)  # operations stay on the GPU
+    print(result.device)
+    print(pacho.asnumpy(result))  # explicit transfer at the end
 ```
 
-También puedes cambiar el import en código que use el subconjunto compatible:
+You can also change the import in code that uses the supported subset:
 
 ```python
 import openpacho as np
@@ -76,77 +77,77 @@ import openpacho as np
 np.set_backend("opencl")
 a = np.asarray([[4, 1], [1, 3]], dtype=np.float32)
 b = np.asarray([1, 2], dtype=np.float32)
-resultado = a @ b
-print(np.asnumpy(resultado))
+result = a @ b
+print(np.asnumpy(result))
 ```
 
-El backend inicial es `numpy`, sin inicialización de GPU al importar. `set_backend`
-cambia dónde se crean los próximos arrays; `use_backend` restaura la selección al salir.
-Los arrays existentes conservan su dispositivo. Para escoger uno concreto:
+The initial backend is `numpy`; importing the package does not initialize a GPU.
+`set_backend` changes where subsequent arrays are created; `use_backend` restores
+the selection on exit. Existing arrays keep their device. To select a specific one:
 
 ```python
 print(pacho.devices())
-pacho.set_backend("opencl", device="0:0")  # ID de plataforma:dispositivo
+pacho.set_backend("opencl", device="0:0")  # platform:device ID
 ```
 
-La selección OpenCL predeterminada exige una GPU. Un dispositivo OpenCL de CPU se
-puede seleccionar explícitamente por ID. No hay fallback automático cuando falla GPU.
+The default OpenCL selection requires a GPU. An OpenCL CPU device can be selected
+explicitly by ID. There is no automatic fallback when GPU execution fails.
 
-## Qué incluye
+## Features
 
-- Arrays de cualquier dimensión con broadcasting, operaciones escalares y promoción de tipos de NumPy 2.
-- `+`, `-`, `*`, `/`, potencia flotante, comparaciones y funciones `sqrt`, `exp`, `log`, `sin`, `cos`, `tanh`, `abs`, `isfinite`.
-- `where(condición, x, y)` con broadcasting de los tres argumentos; selecciona en el backend sin descargar. Consulta los [límites de selección](docs/compatibility.md#selección-condicional).
-- `sum`, `mean`, `min`, `max`, reshape, transposición, índices enteros y slices, diagonales, `dot` para vectores/matrices y `@`/`matmul` por lotes con broadcasting de dimensiones iniciales.
-- Tipos `float32`, `float64`, `int32`, `int64`, `uint32`, `uint64`, `bool` según la operación y las capacidades del dispositivo.
-- Normas euclídeas/Frobenius escaladas para evitar cuadrados intermedios extremos.
-- [Generación aleatoria residente](docs/random.md) con `pacho.random.default_rng(seed, backend=...)`: uniforme, normal y exponencial; semilla reproducible y parámetros escalares.
-- CLI de dispositivos y benchmarks reproducibles con sincronización y validación contra NumPy.
-- Compilación opcional con `pacho.compile(f)`, `@pacho.compile` y `@pacho.compile()`: planes cacheados/preparados, salidas múltiples y fusión elemento a elemento/map-reduce en OpenCL, Vulkan y CUDA para los grupos soportados; consulta [el contrato y ejemplos](docs/compilation.md) y los [resultados de fusión CUDA](docs/cuda-fusion-results.md).
-- Memoria reutilizable OpenCL/Vulkan y CLBlast opcional con GEMM, GEMM batched, GEMV y DOT flotantes; consulta [ejecución y rendimiento](docs/performance.md).
-- Menor coste de llamadas compiladas y GEMV/DOT custom cooperativos CUDA; consulta las [tres optimizaciones medidas](docs/three-actions-results.md), incluyendo límites y errores numéricos.
-- [Padding opcional](docs/padding.md) con `@pacho.compile(padding=True)` o `pacho.matmul(a, b, padding=True)`: buffers alineados para GEMM custom float32 en OpenCL, Vulkan y CUDA, con coste de memoria y copias explícito; desactivado por defecto.
+- Arrays of any dimensionality with broadcasting, scalar operations, and NumPy 2 type promotion.
+- `+`, `-`, `*`, `/`, floating-point powers, comparisons, and `sqrt`, `exp`, `log`, `sin`, `cos`, `tanh`, `abs`, `isfinite`.
+- `where(condition, x, y)` with three-argument broadcasting; selection runs on the backend without downloading. See the [selection limits](docs/compatibility.md#conditional-selection).
+- `sum`, `mean`, `min`, `max`, reshape, transpose, integer indexing and slices, diagonals, vector/matrix `dot`, and batched `@`/`matmul` with broadcasting of leading dimensions.
+- `float32`, `float64`, `int32`, `int64`, `uint32`, `uint64`, and `bool`, depending on the operation and device capabilities.
+- Scaled Euclidean/Frobenius norms to avoid extreme intermediate squares.
+- [Resident random generation](docs/random.md) with `pacho.random.default_rng(seed, backend=...)`: uniform, normal, and exponential distributions; reproducible seeds and scalar parameters.
+- A device CLI and reproducible benchmarks with synchronization and validation against NumPy.
+- Optional compilation with `pacho.compile(f)`, `@pacho.compile`, and `@pacho.compile()`: cached/prepared plans, multiple outputs, and elementwise/map-reduce fusion in OpenCL, Vulkan, and CUDA for supported groups; see the [contract and examples](docs/compilation.md) and [CUDA fusion results](docs/cuda-fusion-results.md).
+- Reusable OpenCL/Vulkan memory and optional CLBlast with GEMM, batched GEMM, GEMV, and floating-point DOT; see [execution and performance](docs/performance.md).
+- Lower compiled-call overhead and cooperative custom CUDA GEMV/DOT; see the [three measured optimizations](docs/three-actions-results.md), including limitations and numerical errors.
+- [Optional padding](docs/padding.md) with `@pacho.compile(padding=True)` or `pacho.matmul(a, b, padding=True)`: aligned buffers for custom float32 GEMM in OpenCL, Vulkan, and CUDA, with explicit memory and copy costs; disabled by default.
 
-La [ronda de staging Vulkan y aleatorios](docs/staging-random-results.md) documenta
-la selección de mapeos de lectura, el RNG residente y sus controles de tiempo/error.
+The [Vulkan staging and random generation round](docs/staging-random-results.md)
+documents readback mapping selection, the resident RNG, and timing/error controls.
 
-El [análisis de gaps y optimización](docs/gaps-and-optimization.md) distingue
-limitaciones del hardware, costes del runtime y oportunidades pendientes.
-La [iteración de Vulkan, GEMM y estabilidad](docs/numerics-vulkan-results.md)
-presenta mejoras medidas y límites pendientes. Los benchmarks publican
-[error numérico y casos adversos](docs/numerical-accuracy.md), además de tiempos.
-La [continuación de solvers y aplicaciones](docs/solver-applications-results.md)
-amplía las mediciones y prepara el [camino CUDA](docs/cuda-backend-plan.md).
-La [ronda CUDA inicial](docs/cuda-initial-results.md) implementa CUDA y mejora
-la reutilización Vulkan cuando cambian las formas. La [ronda de dispatch](docs/vulkan-dispatch-results.md)
-reduce conversiones Python/CFFI y publica diagnóstico GPU/host con un control alternado.
-La [ampliación entre backends](docs/backend-sharing-results.md) incorpora push
-descriptors Vulkan por capacidad, metadatos/índices OpenCL y lotes/tiles CUDA.
-La [ronda de kernels y estabilidad](docs/kernel-stability-results.md) añade reposo
-observado entre proveedores, controles de variantes y guardas especializadas OpenCL.
-La [inspección de código generado](docs/kernel-inspection-results.md) corrige una
-promoción accidental a float64 en GEMM OpenCL, revisa las copias y distingue
-evidencia PTX/SPIR-V/SASS de hipótesis sobre el hardware.
-La [reevaluación de padding](docs/padding-reassessment.md) conserva la opción por
-ganancias concretas en productos rectangulares, manteniéndola desactivada por
-defecto y documentando las formas donde pierde rendimiento.
-La [comparación del compilador, Vulkan y referencias CUDA](docs/execution-results.md)
-separa ejecución residente, transferencias y primera ejecución.
-La [primera comparación de optimizaciones](docs/optimization-results.md) incluye
-la versión anterior a esa etapa, NumPy y los caminos medidos en la misma sesión.
+The [gap and optimization analysis](docs/gaps-and-optimization.md) distinguishes
+hardware limitations, runtime costs, and remaining opportunities.
+The [Vulkan, GEMM, and stability iteration](docs/numerics-vulkan-results.md)
+reports measured improvements and unresolved limits. Benchmarks publish
+[numerical error and adversarial cases](docs/numerical-accuracy.md) alongside timings.
+The [solver and application follow-up](docs/solver-applications-results.md)
+extends the measurements and prepares the [CUDA path](docs/cuda-backend-plan.md).
+The [initial CUDA round](docs/cuda-initial-results.md) implements CUDA and improves
+Vulkan reuse when shapes change. The [dispatch round](docs/vulkan-dispatch-results.md)
+reduces Python/CFFI conversions and reports GPU/host diagnostics with an interleaved control.
+The [cross-backend extension](docs/backend-sharing-results.md) adds Vulkan push
+descriptors when supported, OpenCL metadata/indexing, and CUDA batches/tiles.
+The [kernel and stability round](docs/kernel-stability-results.md) adds observed
+idle checks between providers, variant controls, and specialized OpenCL guards.
+The [generated-code inspection](docs/kernel-inspection-results.md) fixes accidental
+float64 promotion in OpenCL GEMM, reviews copies, and distinguishes PTX/SPIR-V/SASS
+evidence from hardware hypotheses.
+The [padding reassessment](docs/padding-reassessment.md) retains the option for
+specific gains in rectangular products, keeps it disabled by default, and
+documents shapes where it loses performance.
+The [compiler, Vulkan, and CUDA reference comparison](docs/execution-results.md)
+separates resident execution, transfers, and first execution.
+The [first optimization comparison](docs/optimization-results.md) includes the
+snapshot preceding that stage, NumPy, and the paths measured in the same session.
 
-**No buscamos compatibilidad 100 % con NumPy.** Priorizamos cálculos matriciales
-frecuentes con mejoras medibles y un coste de implementación razonable. La [tabla de compatibilidad](docs/compatibility.md)
-documenta las diferencias: sin escritura por índice, `out=`, indexación avanzada,
-arrays complejos ni álgebra dispersa. Las funciones no soportadas
-fallan explícitamente. `np.asarray(array_pacho)` no copia silenciosamente a CPU;
-usa `pacho.asnumpy` cuando una dependencia necesite un ndarray de NumPy.
+**Full NumPy compatibility is not a goal.** We prioritize frequent matrix
+computations with measurable improvements and a reasonable implementation cost.
+The [compatibility table](docs/compatibility.md) documents differences: no indexed
+writes, `out=`, advanced indexing, complex arrays, or sparse algebra. Unsupported
+functions fail explicitly. `np.asarray(array_pacho)` does not silently copy to the
+CPU; use `pacho.asnumpy` when a dependency needs a NumPy ndarray.
 
-## Aplicaciones de ejemplo
+## Example applications
 
-La librería ofrece operaciones matriciales, no solvers numéricos. CG, Jacobi,
-descenso más pronunciado y sistemas preparados viven en [examples](examples/README.md),
-fuera del paquete instalable. Desde el repositorio:
+The library provides matrix operations, not numerical solvers. CG, Jacobi,
+steepest descent, and prepared systems live in [examples](examples/README.md),
+outside the installable package. From the repository:
 
 ```python
 import openpacho as pacho
@@ -160,13 +161,13 @@ with pacho.use_backend("opencl"):
     print(pacho.asnumpy(result.x))
 ```
 
-CG y descenso más pronunciado requieren una matriz simétrica definida positiva;
-Jacobi requiere diagonal no nula y una iteración convergente. Los ejemplos no prueban
-estas propiedades. El criterio de parada usa el residuo real
-`||b - A @ x|| <= max(atol, rtol * ||b||)`. No converger devuelve `converged=False`
-y una razón; no se presenta el último iterado como una solución garantizada.
+CG and steepest descent require a symmetric positive-definite matrix; Jacobi
+requires a nonzero diagonal and a convergent iteration. The examples do not prove
+these properties. The stopping criterion uses the true residual
+`||b - A @ x|| <= max(atol, rtol * ||b||)`. Failure to converge returns
+`converged=False` and a reason; the last iterate is not presented as a guaranteed solution.
 
-## Verificar y medir
+## Verify and measure
 
 ```sh
 python -m pytest
@@ -176,35 +177,35 @@ pacho benchmark --backend numpy --size 256 --repeat 5
 python -m build
 ```
 
-Las pruebas OpenCL se omiten si no existe el runtime/dispositivo. Para que la
-ausencia de GPU sea un fallo de la verificación:
+OpenCL tests are skipped when the runtime/device is unavailable. To make a missing
+GPU fail verification:
 
 ```powershell
 $env:PACHO_REQUIRE_OPENCL = "1"
 python -m pytest
 ```
 
-En Linux: `PACHO_REQUIRE_OPENCL=1 python -m pytest`. `PACHO_OPENCL_DEVICE=0:0`
-permite seleccionar un dispositivo de prueba concreto.
+On Linux: `PACHO_REQUIRE_OPENCL=1 python -m pytest`. `PACHO_OPENCL_DEVICE=0:0`
+selects a specific test device.
 
-Los benchmarks separan transferencia inicial, primera ejecución (incluida compilación),
-operaciones con datos residentes y descarga. No se promete una aceleración universal:
-el tamaño del problema, la precisión, el controlador y el coste de despacho importan.
-Consulta [arquitectura actual](docs/architecture.md), [decisiones de evolución](docs/architecture-evolution.md) y [prioridades](docs/roadmap.md).
-Los resultados comprobados en este equipo están en [verificación local](docs/verification.md).
-La comparación extensa CPU/OpenCL/CUDA, incluyendo transferencias y solvers hasta
-8192 variables, está en [resultados de benchmarks](docs/benchmark-results.md).
+Benchmarks separate the initial transfer, first execution (including compilation),
+operations on resident data, and download. No universal speedup is promised:
+problem size, precision, driver, and dispatch overhead matter.
+See the [current architecture](docs/architecture.md), [evolution decisions](docs/architecture-evolution.md), and [priorities](docs/roadmap.md).
+Results verified on this machine are recorded in [local verification](docs/verification.md).
+The extensive CPU/OpenCL/CUDA comparison, including transfers and solvers with
+up to 8192 variables, is in the [benchmark results](docs/benchmark-results.md).
 
-## Origen y reconocimiento
+## Origins and acknowledgments
 
-El proyecto original es [azapat47/pypacho](https://github.com/azapat47/pypacho), de
-Andrés Felipe Zapata Palacio, Esteban Echeverri Jaramillo, Diego Alejandro Cifuentes
-y Juan David Arcila Moreno. Su publicación es
+OpenPacho is developed by **Diego Alejandro Cifuentes**, who co-authored
+[PyPacho](https://github.com/azapat47/pypacho) with Andrés Felipe Zapata Palacio,
+Esteban Echeverri Jaramillo, and Juan David Arcila Moreno. Their work is described in
 [PyPacho: A Python library that implements parallel basic operations on GPUs](https://ieeexplore.ieee.org/document/9623197).
-PyPacho exploró operaciones básicas paralelas en GPU y comparaciones de métodos
-iterativos por plataforma, tamaño y precisión. Ese trabajo es el antecedente
-de la idea que desarrolla OpenPacho.
+PyPacho explored parallel basic operations on GPUs and comparisons of iterative
+methods across platforms, problem sizes, and precisions. That work laid the
+foundation for the idea developed in OpenPacho.
 
-Esta implementación tiene código nuevo y licencia MIT. La
-[nota de procedencia](docs/provenance.md) distingue las referencias inspeccionadas
-de lo que se ha verificado. No afirma reproducir los resultados experimentales del paper.
+This implementation uses new code under the MIT license. The
+[provenance note](docs/provenance.md) distinguishes inspected references from
+verified findings. It does not claim to reproduce the paper's experimental results.

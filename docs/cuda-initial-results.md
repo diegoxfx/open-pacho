@@ -1,27 +1,27 @@
-# Vulkan por capacidad y CUDA inicial
+# Capability-based Vulkan and initial CUDA
 
-Iteración del 2026-09-12 en RTX 5060 Ti, Ryzen 7 5700X3D, Windows 11 y driver
-616.64. Continúa [solvers y aplicaciones](solver-applications-results.md).
-Los números de sesiones anteriores se mantienen como históricos.
+Iteration from 2026-09-12 on RTX 5060 Ti, Ryzen 7 5700X3D, Windows 11, and driver
+616.64. Continues [solvers and applications](solver-applications-results.md).
+Numbers from previous sessions are retained as historical.
 
-## Optimización portable de Vulkan
+## Portable Vulkan optimization
 
-El pool anterior evitaba que tamaños viejos bloquearan permanentemente a los
-nuevos, pero alternar formas cercanas seguía generando muchas reservas. Ahora
-prefiere capacidad exacta y, en su ausencia, toma el menor buffer libre compatible
-hasta `2*max(solicitado,256)`. No crea buffers más grandes para este propósito.
+The previous pool prevented old sizes from permanently blocking new
+ones, but alternating nearby shapes still generated many allocations. It now
+prefers exact capacity and, if none is available, takes the smallest compatible free buffer
+up to `2*max(requested,256)`. It does not create larger buffers for this purpose.
 
-La capacidad original del VkBuffer se conserva al reciclar; el tamaño lógico
-se usa para descriptores y copias. Los bytes nativos asignados mantienen su
-contabilidad separada. Se conservan locks, referencias en vuelo, clases separadas
-para GPU/subida/readback y límites de 128 entradas/128 MiB.
+The original VkBuffer capacity is retained when recycling; logical size
+is used for descriptors and copies. Native allocated bytes retain
+separate accounting. Locks, in-flight references, separate classes
+for GPU/upload/readback, and limits of 128 entries/128 MiB are retained.
 
-Se alternaron cuatro procesos: baseline, optimizado, baseline, optimizado. El
-baseline carga un snapshot del runtime anterior; compilador y shaders son iguales.
-Cada proceso conserva cinco matrices/transpuestas y alterna ridge de veinte pasos,
-GEMV y GEMV transpuesto, con 21 muestras por caso. Medianas residentes:
+Four processes alternated: baseline, optimized, baseline, optimized. The
+baseline loads a previous-runtime snapshot; compiler and shaders are identical.
+Each process retains five matrices/transposes and alternates twenty-step ridge,
+GEMV, and transposed GEMV, with 21 samples per case. Resident medians:
 
-| Forma ridge float32 | Baseline, dos procesos | Optimizado, dos procesos |
+| float32 ridge shape | Baseline, two processes | Optimized, two processes |
 | --- | ---: | ---: |
 | 4096×128 | 20.54–21.72 ms | 7.28–7.78 ms |
 | 4097×128 | 9.07–9.94 ms | 7.09–7.52 ms |
@@ -29,134 +29,134 @@ GEMV y GEMV transpuesto, con 21 muestras por caso. Medianas residentes:
 | 4097×129 | 22.07–22.71 ms | 6.81–7.55 ms |
 | 4095×127 | 36.70–36.92 ms | 7.16–7.34 ms |
 
-Un perfil separado de diez rondas mixtas pasó de **1.432 reservas y liberaciones
-a cero**, conservando 4.100 dispatches. Los errores de las quince operaciones
-coincidieron exactamente entre procesos; ridge quedó entre 5.79e-8 y 8.48e-8
-de error relativo L2 frente a la trayectoria float64.
+A separate profile of ten mixed rounds went from **1,432 allocations and frees
+to zero**, retaining 4,100 dispatches. Errors for all fifteen operations
+matched exactly across processes; ridge reached relative L2 errors of 5.79e-8 to 8.48e-8
+against the float64 trajectory.
 
-La caché final retuvo 3.05 MiB frente a 1.00 MiB. Es memoria libre retenida, no
-pico de memoria total; ambas versiones conservaron 128 entradas. Formas muy
-distintas o un conjunto que exceda los límites todavía pueden causar reservas.
-El resultado es una mejora del runtime portable, sin ajuste por fabricante/SO.
+The final cache retained 3.05 MiB versus 1.00 MiB. This is retained free memory, not
+peak total memory; both versions retained 128 entries. Very different
+shapes or a set exceeding limits may still cause allocations.
+The result is an improvement to the portable runtime, without vendor/OS-specific tuning.
 
-## Primera base CUDA
+## First CUDA foundation
 
-`_cuda.py` implementa contexto primario retenido, stream propio, memoria residente,
-pool acotado, NVRTC, aritmética/broadcasting, gather, reducciones flotantes y
-productos de vectores/matrices 2D. El proveedor por defecto es cuBLAS mediante
-bindings nvmath; también se puede elegir un kernel custom directo. CuPy no es
-dependencia del runtime. No hay fusión CUDA, normas estables, solvers ni lotes.
+`_cuda.py` implements a retained primary context, dedicated stream, resident memory,
+bounded pool, NVRTC, arithmetic/broadcasting, gather, floating-point reductions, and
+2D vector/matrix products. The default provider is cuBLAS through
+nvmath bindings; a direct custom kernel can also be selected. CuPy is not
+a runtime dependency. There is no CUDA fusion, stable norms, solvers, or batching.
 
-La selección y límites están en el [contrato CUDA](cuda.md). `compile` ya puede
-capturar y reutilizar el plan, pero las filas CUDA se etiquetan explícitamente
-como `eager-primitives`: no anuncian kernels fusionados.
+Selection and limits are in the [CUDA contract](cuda.md). `compile` can already
+capture and reuse the plan, but CUDA rows are explicitly labeled
+`eager-primitives`: they do not claim fused kernels.
 
-La revisión añadió protección para fronteras nativas importantes: completar
-la subida antes de publicar el array al stream no bloqueante, retirar cada
-puntero liberado del pool aunque una liberación posterior falle, y sincronizar
-la expulsión de módulos antes de cargar uno nuevo. Hay pruebas CPU que reproducen
-estas condiciones y pruebas reales de propiedad/restauración del contexto.
+Review added protection at important native boundaries: completing
+upload before publishing the array to the nonblocking stream, removing every
+freed pointer from the pool even if a later free fails, and synchronizing
+module eviction before loading a new one. CPU tests reproduce
+these conditions, and real tests check context ownership/restoration.
 
-cuBLAS usa `PEDANTIC_MATH`; NVRTC deshabilita FMA contraction, FTZ y fast-math.
-Son decisiones explícitas de esta etapa. No se atribuyen diferencias con CuPy
-a Tensor Cores ni al límite físico del hardware sin un control correspondiente.
+cuBLAS uses `PEDANTIC_MATH`; NVRTC disables FMA contraction, FTZ, and fast-math.
+These are explicit decisions at this stage. Differences from CuPy are not attributed
+to Tensor Cores or the hardware's physical limit without a corresponding control.
 
-## Aplicaciones
+## Applications
 
-La suite compara las mismas expresiones, datos, dtypes, preparación y veinte
-pasos de ridge. Incluye NumPy 1/8 hilos, OpenCL custom/CLBlast, Vulkan, CuPy y los
-dos proveedores CUDA. OpenPacho aparece en modo eager y plan compilado; CUDA
-todavía carece de fusión. Son 13 implementaciones intercaladas, siete muestras
-residentes y completas por caso. La preparación y diagnósticos quedan visibles.
+The suite compares the same expressions, data, dtypes, preparation, and twenty
+ridge steps. It includes NumPy with 1/8 threads, OpenCL custom/CLBlast, Vulkan, CuPy, and
+both CUDA providers. OpenPacho appears in eager and compiled-plan mode; CUDA
+still lacks fusion. There are 13 interleaved implementations, seven resident
+and complete samples per case. Preparation and diagnostics remain visible.
 
-Para 16384×256 float32, las medianas de planes OpenPacho y controles son:
+For 16384×256 float32, medians of OpenPacho plans and controls are:
 
-| Implementación | Covarianza residente/completa | Error L2 covarianza vs float64 | Ridge residente/completo |
+| Implementation | Resident/complete covariance | Covariance L2 error vs float64 | Resident/complete ridge |
 | --- | ---: | ---: | ---: |
-| NumPy 8 hilos | 7.432 / 6.888 ms | 1.161e-7 | 5.330 / 13.516 ms |
+| NumPy 8 threads | 7.432 / 6.888 ms | 1.161e-7 | 5.330 / 13.516 ms |
 | OpenCL custom | 4.216 / 7.073 ms | 1.907e-6 | 5.979 / 8.471 ms |
 | OpenCL + CLBlast | 1.545 / 3.864 ms | 1.907e-6 | 12.303 / 14.920 ms |
 | Vulkan | 1.898 / 4.902 ms | 1.906e-6 | 7.498 / 8.290 ms |
 | CuPy | 0.861 / 4.072 ms | 1.125e-7 | 4.804 / 6.300 ms |
-| CUDA + cuBLAS, sin fusión | 0.859 / 3.471 ms | 1.288e-7 | 12.853 / 15.556 ms |
-| CUDA custom, sin fusión | 2.845 / 5.240 ms | 1.906e-6 | 19.633 / 22.905 ms |
+| CUDA + cuBLAS, without fusion | 0.859 / 3.471 ms | 1.288e-7 | 12.853 / 15.556 ms |
+| CUDA custom, without fusion | 2.845 / 5.240 ms | 1.906e-6 | 19.633 / 22.905 ms |
 
-CUDA/cuBLAS queda cerca de CuPy en covarianza; la diferencia de dos microsegundos
-no establece una victoria. En ridge tarda 2.68× CuPy y más que OpenCL/Vulkan.
-El producto custom inicial no tiene tiling y tampoco es una alternativa rápida
-general a cuBLAS. El nombre del backend por sí solo no explica su rendimiento.
+CUDA/cuBLAS is close to CuPy in covariance; a two-microsecond difference
+does not establish a victory. For ridge it takes 2.68× CuPy's time and more than OpenCL/Vulkan.
+The initial custom product has no tiling and is not a generally fast alternative
+to cuBLAS either. The backend name alone does not explain its performance.
 
-Ridge CUDA/cuBLAS tiene error L2 6.802e-8 y CUDA custom 4.291e-7 frente a la misma
-trayectoria float64. Estas diferencias numéricas también se conservan en el
-reporte. Veinte pasos no significan convergencia. Las modalidades se cronometran
-en rondas independientes; ruido puede hacer que la mediana completa sea menor
-que la residente. Los JSON contienen muestras y percentiles.
+CUDA/cuBLAS ridge has L2 error 6.802e-8 and CUDA custom 4.291e-7 against the same
+float64 trajectory. These numerical differences are also retained in the
+report. Twenty steps do not imply convergence. Modes are timed
+in independent rounds; noise can make the complete median lower
+than the resident median. JSON files contain samples and percentiles.
 
-La suite mixta tiene más implementaciones que la anterior. No se atribuyen las
-diferencias entre sesiones a la optimización del pool: el control alternado
-anterior es la evidencia que aísla ese cambio.
+The mixed suite has more implementations than the previous one. Between-session
+differences are not attributed to pool optimization: the alternating control
+above is the evidence isolating that change.
 
-Ambas rondas aplicadas terminaron: **104 configuraciones alineadas y 104
-irregulares**, siete muestras por modo, cero errores/ausencias y todos los
-diagnósticos finitos. En ridge 4097×129 float32, las medianas residentes fueron
-2.753 ms NumPy 8 hilos, 5.907 CuPy, 6.606 OpenCL custom, 6.423 CLBlast, 7.644
-Vulkan, 14.959 CUDA/cuBLAS y 12.140 CUDA custom. La diferencia pequeña entre
-OpenCL custom y CLBlast no es una superioridad general del proveedor.
+Both applied rounds finished: **104 aligned and 104
+irregular configurations**, seven samples per mode, zero errors/missing cases, and all
+diagnostics finite. For ridge 4097×129 float32, resident medians were
+2.753 ms NumPy 8 threads, 5.907 CuPy, 6.606 OpenCL custom, 6.423 CLBlast, 7.644
+Vulkan, 14.959 CUDA/cuBLAS, and 12.140 CUDA custom. The small difference between
+OpenCL custom and CLBlast is not general provider superiority.
 
-## Precisión adversa y verificación
+## Adversarial accuracy and verification
 
-La suite Decimal80 midió **158 configuraciones**: 42 por ruta OpenCL custom,
-CLBlast y Vulkan, y 16 por cada proveedor CUDA inicial. Las 26 combinaciones de
-norma/solver por proveedor CUDA se registran en `unsupported_cases`, no como
-ejecuciones correctas. Hubo cero excepciones/backends ausentes y salidas finitas,
-pero **40 alertas numéricas**: las 28 previas y seis por cada proveedor CUDA.
+The Decimal80 suite measured **158 configurations**: 42 each for OpenCL custom,
+CLBlast, and Vulkan, and 16 for each initial CUDA provider. The 26 norm/solver
+combinations per CUDA provider are recorded in `unsupported_cases`, not as
+successful executions. There were zero exceptions/missing backends and outputs were finite,
+but **40 numerical warnings**: the previous 28 and six for each CUDA provider.
 
-Las doce alertas CUDA corresponden a cancelación en sum, dot y GEMM, en ambas
-precisiones. Los errores relativos L2 rondan 0.9565–1.0 frente al cálculo Decimal
-de los inputs realmente representados. Una salida finita con dtype correcto
-puede perder prácticamente todo el resultado de esa cancelación. La reducción
-por árbol y cuBLAS pedantic no garantizan una acumulación compensada. Mejorar
-esas rutas o permitir acumulación más precisa explícita tiene margen, coste y
-contrato propios; no se presenta como una frontera inevitable del hardware.
+The twelve CUDA warnings concern cancellation in sum, dot, and GEMM, in both
+precisions. Relative L2 errors are around 0.9565–1.0 against the Decimal computation
+on the actually represented inputs. A finite output with the correct dtype
+can lose practically the entire result of that cancellation. Tree reduction
+and pedantic cuBLAS do not guarantee compensated accumulation. Improving
+those paths or allowing explicit higher-precision accumulation has its own headroom, cost, and
+contract; this is not presented as an inevitable hardware boundary.
 
-CUDA conservó la suma de subnormales en ambos dtypes en este control; Vulkan
-float32 mantiene su alerta previa. No se generaliza ese resultado a todos los
-shaders, proveedores o dispositivos. El comando de precisión retorna código 1
-por alertas diagnósticas, no por excepciones. Sus umbrales no son una promesa
-universal de precisión del API.
+CUDA preserved subnormal summation in both dtypes in this control; Vulkan
+float32 retains its previous warning. That result is not generalized to all
+shaders, providers, or devices. The accuracy command returns code 1
+for diagnostic warnings, not exceptions. Its thresholds are not a universal
+API accuracy promise.
 
-La suite completa pasa **1.019 pruebas, con una omisión** por requerir dos
-dispositivos OpenCL. Incluye 38 casos CUDA, siete regresiones CPU de fronteras
-nativas y nueve pruebas nuevas de reutilización Vulkan. OpenCL, Vulkan y CUDA
-fueron obligatorios; CLBlast nativo estuvo habilitado.
+The complete suite passes **1,019 tests, with one skip** because two
+OpenCL devices are required. It includes 38 CUDA cases, seven CPU regressions for native
+boundaries, and nine new Vulkan reuse tests. OpenCL, Vulkan, and CUDA
+were required; native CLBlast was enabled.
 
-El wheel se construyó desde sdist y se instaló sin dependencias GPU en el entorno
-CPU: **311 pasan, 672 omitidas**, importando desde site-packages fuera de `src`.
-CUDA también ejecutó un subprocess que bloquea CuPy. Ruff, formato y sintaxis
-Python 3.10 se comprueban; el runtime se ejecutó en Python 3.12.14. No se ha
-verificado instalación CUDA en un segundo sistema ni CI remota.
+The wheel was built from sdist and installed without GPU dependencies in the
+CPU environment: **311 passed, 672 skipped**, importing from site-packages outside `src`.
+CUDA also ran a subprocess blocking CuPy. Ruff, formatting, and Python
+3.10 syntax are checked; the runtime executed on Python 3.12.14. CUDA installation
+on a second system and remote CI have not been verified.
 
-## Prioridad siguiente
+## Next priority
 
-1. Mantener Vulkan como trabajo principal: perfilar envío, lectura escalar y
-   staging después de reducir reservas; medir un ejecutor nativo acotado si
-   domina Python/CFFI. Comprobar un segundo fabricante cuando exista hardware.
-2. CUDA inicial: medir GEMV/DOT dedicados y coste por llamada/contexto antes de
-   ampliar operaciones. Después implementar lowering fusionado y normas estables,
-   con precisión y vida útil como requisitos para habilitar solvers.
-3. Mantener comparaciones aplicadas y formas irregulares; ampliar distancias y
-   transformaciones por lotes cuando esas cargas guíen una mejora concreta.
-4. Optimización por familias de hardware/SO continúa como track secundario.
-   Dispersas y compatibilidad completa con NumPy siguen fuera de esta etapa.
+1. Keep Vulkan as the main work: profile submission, scalar reads, and
+   staging after reducing allocations; measure a bounded native executor if
+   Python/CFFI dominates. Check a second vendor when hardware is available.
+2. Initial CUDA: measure dedicated GEMV/DOT and per-call/context costs before
+   extending operations. Then implement fused lowering and stable norms,
+   with accuracy and lifetimes as requirements for enabling solvers.
+3. Retain applied comparisons and irregular shapes; extend distances and
+   batched transformations when those workloads guide a specific improvement.
+4. Optimization by hardware/OS families remains a secondary track.
+   Sparse operations and full NumPy compatibility remain outside this stage.
 
-## Evidencia local
+## Local evidence
 
-Controles y snapshot: `.artifacts/cuda-initial`. Resultados y logs:
-`.artifacts/benchmarks/cuda-initial`. Los cuatro archivos
-`vulkan-capacity-{baseline,current}-{1,2}.json` aíslan el pool. Las aplicaciones
-finales son `applications.json` y `applications-irregular.json`.
-Los archivos `applications-quick*.json` y `cuda-cli.json` son verificaciones
-exploratorias previas al cierre de fronteras nativas y no sustentan la tabla.
-`accuracy.json` conserva alertas y exclusiones. Distribuciones en
-`.artifacts/dist-cuda-initial`; hashes de fuentes/artefactos en
+Controls and snapshot: `.artifacts/cuda-initial`. Results and logs:
+`.artifacts/benchmarks/cuda-initial`. The four files
+`vulkan-capacity-{baseline,current}-{1,2}.json` isolate the pool. Final
+applications are `applications.json` and `applications-irregular.json`.
+The `applications-quick*.json` and `cuda-cli.json` files are exploratory checks
+before native boundaries were finalized and do not support the table.
+`accuracy.json` retains warnings and exclusions. Distributions are in
+`.artifacts/dist-cuda-initial`; source/artifact hashes are in
 `.artifacts/benchmarks/cuda-initial/manifest.json`.

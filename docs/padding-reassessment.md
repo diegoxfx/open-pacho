@@ -1,197 +1,197 @@
-# Reevaluación de padding con la base OpenCL corregida
+# Padding reassessment with the corrected OpenCL baseline
 
-Fecha: 2026-09-19. **Se conserva `padding=True` como opción explícita, desactivada
-por defecto.** Encontramos una ventaja reproducible en productos con pocas filas
-y K largo, incluso incluyendo relleno y recorte. La mayoría de las formas medidas
-empeora; no se justifica activarlo automáticamente ni priorizar su expansión.
+Date: 2026-09-19. **`padding=True` remains an explicit option, disabled
+by default.** We found a reproducible advantage in products with few rows
+and long K, even including padding and cropping. Most measured shapes
+regress; automatic activation or prioritizing its expansion is not justified.
 
-La [corrección anterior](kernel-inspection-results.md) eliminó conversiones
-accidentales a float64 en cargas OpenCL. Invalidó la ventaja histórica del padding
-en el producto grande irregular ensayado entonces. Esta ronda utiliza esa base
-corregida en **ambos** lados de cada comparación. No modifica el runtime, sus
-kernels, flags matemáticos ni tolerancias.
+The [previous fix](kernel-inspection-results.md) removed accidental
+float64 conversions in OpenCL loads. It invalidated the historical padding advantage
+in the large irregular product tested then. This round uses that corrected
+baseline on **both** sides of every comparison. It does not change the runtime, its
+kernels, math flags or tolerances.
 
-## Evidencia principal
+## Main evidence
 
-RTX 5060 Ti, Windows, driver 616.64, float32, proveedores custom. Para
-`(65,8191) @ (8191,2051)`, estas son las medianas y aceleraciones de tres rondas
-con semillas distintas. Un factor mayor de uno favorece padding.
-El control combina las dos medianas sin padding mediante su media geométrica;
-la aceleración divide ese valor por la mediana con padding de la misma ronda.
+RTX 5060 Ti, Windows, driver 616.64, float32, custom providers. For
+`(65,8191) @ (8191,2051)`, these are medians and speedups from three rounds
+with different seeds. A factor above one favors padding.
+The control combines the two unpadded medians using their geometric mean;
+speedup divides that value by the padded median from the same round.
 
-| Backend | Residente sin padding, ms | Residente con padding, ms | Aceleración residente | Aceleración con upload y download |
+| Backend | Resident without padding, ms | Resident with padding, ms | Resident speedup | Speedup with upload and download |
 | --- | ---: | ---: | ---: | ---: |
-| OpenCL | 1,643–1,666 | 1,173–1,220 | **1,366–1,400×** | **1,040–1,041×** |
-| CUDA custom | 1,759–1,769 | 1,451–1,458 | **1,212–1,214×** | 0,843–0,865× |
-| Vulkan | 0,782–0,820 | 1,111–1,212 | 0,677–0,704× | 0,902–0,913× |
+| OpenCL | 1.643–1.666 | 1.173–1.220 | **1.366–1.400×** | **1.040–1.041×** |
+| CUDA custom | 1.759–1.769 | 1.451–1.458 | **1.212–1.214×** | 0.843–0.865× |
+| Vulkan | 0.782–0.820 | 1.111–1.212 | 0.677–0.704× | 0.902–0.913× |
 
-El tiempo residente incluye la llamada pública preparada, asignaciones, copias,
-relleno, GEMM, recorte y sincronización. No usa entradas preempaquetadas ni elimina
-las copias entre invocaciones. La ruta completa añade subir las dos entradas y
-descargar el resultado de ese mismo plan preparado; no mide `matmul` eager.
-CUDA gana con datos residentes y pierde al incluir transferencias en esta forma.
-OpenCL conserva una ganancia pequeña en el recorrido completo.
+Resident time includes the prepared public call, allocations, copies,
+padding, GEMM, cropping and synchronization. It does not use prepacked inputs or remove
+copies between invocations. The complete path adds uploading both inputs and
+downloading the result of that same prepared plan; it does not measure eager `matmul`.
+CUDA wins with resident data and loses when transfers are included on this shape.
+OpenCL retains a small gain over the complete path.
 
-Los dos controles independientes sin padding difieren como máximo un 0,47% en
-este caso OpenCL, 0,33% en CUDA y 1,94% en Vulkan, entre ámbitos y rondas. La señal
-residente favorable supera esa variabilidad observada. Esto no es una garantía
-estadística para otros tamaños, dispositivos o aplicaciones.
+The two independent unpadded controls differ by at most 0.47% in
+this OpenCL case, 0.33% on CUDA and 1.94% on Vulkan, across scopes and rounds. The
+favorable resident signal exceeds that observed variability. This is not a statistical
+guarantee for other sizes, devices or applications.
 
-Aquí se pasa físicamente a `(96,8192) @ (8192,2080)`. `explain` informa
-**72.101.888 bytes adicionales** de buffers privados y tres dispatches de copia.
-Ese valor excluye entradas originales, salida lógica, pools y memoria del driver.
-El coste de memoria es real aunque el número de tiles y de iteraciones K del
-GEMM ya fuese el mismo antes de rellenar.
+The physical shape here becomes `(96,8192) @ (8192,2080)`. `explain` reports
+**72,101,888 additional bytes** of private buffers and three copy dispatches.
+That value excludes original inputs, logical output, pools and driver memory.
+The memory cost is real even though the GEMM tile count and K iteration count
+were already the same before padding.
 
-## Distribución de resultados
+## Distribution of results
 
-Aceleración residente mínima–máxima entre las tres rondas. Todas las formas se
-conservan en la tabla, incluidas las desfavorables. Los rangos son variación entre
-rondas, no intervalos de confianza.
+Minimum–maximum resident speedup across the three rounds. All shapes are
+retained in the table, including unfavorable ones. Ranges show variation between
+rounds, not confidence intervals.
 
-| M,K,N / lotes | OpenCL | CUDA custom | Vulkan |
+| M,K,N / batches | OpenCL | CUDA custom | Vulkan |
 | --- | ---: | ---: | ---: |
-| 257,255,259 | 0,373–0,563× | 0,448–0,455× | 0,544–0,608× |
-| 1024,1024,1024, alineado | 0,994–1,000× | 1,002–1,011× | 1,008–1,015× |
-| 1025,1023,1027 | 0,910–0,917× | 0,833–0,868× | 0,766–0,832× |
-| 2049,2047,2051 | 0,954–0,955× | 0,999–1,010× | 0,896–0,902× |
-| 4095,4095,4095 | 1,006–1,008× | 0,919–0,928× | 0,857–0,866× |
-| 4097,4093,4101 | 1,002–1,008× | 0,911–0,963× | 0,777–0,795× |
-| 2048,2047,2048 | 0,987–0,988× | 0,965–0,966× | 0,925–0,938× |
-| 2047,2048,2048 | 0,986–0,988× | 0,964–0,965× | 0,927–0,936× |
-| 2048,2048,2049 | 0,993–0,996× | 0,970–0,980× | 0,937–0,943× |
-| 1024,8191,1024 | 0,949–0,951× | 0,945–0,947× | 0,898–0,899× |
-| 65,8191,2051 | **1,366–1,400×** | **1,212–1,214×** | 0,677–0,704× |
-| 4097,255,4099 | 0,825–0,830× | 0,425–0,433× | 0,385–0,391× |
-| 8191,513,257 | 0,907–0,927× | 0,768–0,848× | 0,726–0,784× |
-| 127,2047,8191 | 0,796–0,803× | 0,699–0,714× | 0,706–0,713× |
-| lote 4; 257,255,259 | 0,524–0,587× | 0,531–0,546× | 0,581–0,663× |
-| lotes (2,1)/(1,3); 257,511,259 | 0,623–0,720× | 0,611–0,636× | 0,641–0,701× |
+| 257,255,259 | 0.373–0.563× | 0.448–0.455× | 0.544–0.608× |
+| 1024,1024,1024, aligned | 0.994–1.000× | 1.002–1.011× | 1.008–1.015× |
+| 1025,1023,1027 | 0.910–0.917× | 0.833–0.868× | 0.766–0.832× |
+| 2049,2047,2051 | 0.954–0.955× | 0.999–1.010× | 0.896–0.902× |
+| 4095,4095,4095 | 1.006–1.008× | 0.919–0.928× | 0.857–0.866× |
+| 4097,4093,4101 | 1.002–1.008× | 0.911–0.963× | 0.777–0.795× |
+| 2048,2047,2048 | 0.987–0.988× | 0.965–0.966× | 0.925–0.938× |
+| 2047,2048,2048 | 0.986–0.988× | 0.964–0.965× | 0.927–0.936× |
+| 2048,2048,2049 | 0.993–0.996× | 0.970–0.980× | 0.937–0.943× |
+| 1024,8191,1024 | 0.949–0.951× | 0.945–0.947× | 0.898–0.899× |
+| 65,8191,2051 | **1.366–1.400×** | **1.212–1.214×** | 0.677–0.704× |
+| 4097,255,4099 | 0.825–0.830× | 0.425–0.433× | 0.385–0.391× |
+| 8191,513,257 | 0.907–0.927× | 0.768–0.848× | 0.726–0.784× |
+| 127,2047,8191 | 0.796–0.803× | 0.699–0.714× | 0.706–0.713× |
+| batch 4; 257,255,259 | 0.524–0.587× | 0.531–0.546× | 0.581–0.663× |
+| batches (2,1)/(1,3); 257,511,259 | 0.623–0.720× | 0.611–0.636× | 0.641–0.701× |
 
-Solo una de las quince formas irregulares supera el 5% residente en las tres
-rondas de OpenCL y CUDA. Ninguna lo hace en Vulkan. Las mejoras inferiores al 1%
-de OpenCL en matrices grandes no cambian la decisión. El caso completamente
-alineado no rellena ni copia: pequeñas diferencias allí corresponden a
-especialización de guardas o variación, no prueban valor del padding físico.
+Only one of the fifteen irregular shapes exceeds 5% resident improvement in all three
+OpenCL and CUDA rounds. None does on Vulkan. OpenCL improvements below 1%
+on large matrices do not change the decision. The fully
+aligned case does not pad or copy: small differences there come from
+guard specialization or variation, and do not prove the value of physical padding.
 
-## Comprobación de tamaños cercanos
+## Nearby-size check
 
-Antes de cerrar la decisión se probaron siete formas cercanas en OpenCL y CUDA,
-con dos rondas nuevas y la misma metodología: **28 grupos y 5.040 muestras**.
-El beneficio sobrevive en varias formas, pero no se extiende uniformemente:
+Before closing the decision, seven nearby shapes were tested on OpenCL and CUDA,
+with two new rounds and the same methodology: **28 groups and 5,040 samples**.
+The benefit survives on several shapes but does not extend uniformly:
 
-| M,K,N | OpenCL residente | CUDA residente | OpenCL completo | CUDA completo |
+| M,K,N | OpenCL resident | CUDA resident | OpenCL complete | CUDA complete |
 | --- | ---: | ---: | ---: | ---: |
-| 65,8191,2051 | 1,394× | 1,213–1,218× | 1,041× | 0,863× |
-| 64,8191,2051 | 1,469–1,472× | 0,918–0,920× | 1,045–1,047× | 0,833–0,835× |
-| 127,8191,2051 | 1,153–1,159× | 0,608–0,610× | 1,016–1,018× | 0,775–0,794× |
-| 256,8191,2051 | 0,871× | 0,775–0,778× | 0,975–0,977× | 0,804–0,821× |
-| 65,4095,2051 | 1,290–1,343× | 1,167–1,178× | 1,032–1,037× | 1,025–1,026× |
-| 65,8191,2048 | 1,431–1,437× | 0,847–0,873× | 1,043–1,045× | 0,830–0,839× |
-| 65,8192,2051 | 1,376–1,403× | 1,215–1,223× | 1,039–1,041× | 0,864–0,865× |
+| 65,8191,2051 | 1.394× | 1.213–1.218× | 1.041× | 0.863× |
+| 64,8191,2051 | 1.469–1.472× | 0.918–0.920× | 1.045–1.047× | 0.833–0.835× |
+| 127,8191,2051 | 1.153–1.159× | 0.608–0.610× | 1.016–1.018× | 0.775–0.794× |
+| 256,8191,2051 | 0.871× | 0.775–0.778× | 0.975–0.977× | 0.804–0.821× |
+| 65,4095,2051 | 1.290–1.343× | 1.167–1.178× | 1.032–1.037× | 1.025–1.026× |
+| 65,8191,2048 | 1.431–1.437× | 0.847–0.873× | 1.043–1.045× | 0.830–0.839× |
+| 65,8192,2051 | 1.376–1.403× | 1.215–1.223× | 1.039–1.041× | 0.864–0.865× |
 
-El caso favorable principal vuelve a ganar con datos distintos. Reducir M de 65
-a 64 o alinear N basta para invertir la ventaja CUDA; OpenCL se comporta de otra
-manera. Una regla basada solo en «K largo» o «tamaño irregular» sería insuficiente.
-Este seguimiento selecciona vecinos de una forma descubierta en la suite; no
-debe interpretarse como una muestra imparcial de todos los workloads posibles.
+The main favorable case wins again with different data. Reducing M from 65
+to 64 or aligning N is enough to reverse the CUDA advantage; OpenCL behaves
+differently. A rule based only on “long K” or “irregular size” would be insufficient.
+This follow-up selects neighbors of a shape discovered in the suite; it must not
+be interpreted as an unbiased sample of all possible workloads.
 
-## Precisión
+## Accuracy
 
-Los **144 grupos forma/backend/semilla** producen resultados idénticos bit a bit
-entre `off-a`, `on` y `off-b`; la repetición de cada ámbito también conserva sus
-bits. Eso demuestra ausencia de cambios numéricos observados por padding, no
-exactitud universal de GEMM float32.
+The **144 shape/backend/seed groups** produce bitwise identical results
+between `off-a`, `on` and `off-b`; repetition in each scope also preserves
+bits. That demonstrates no observed numerical changes from padding, not
+universal float32 GEMM accuracy.
 
-Se mantiene `rtol=5e-5, atol=5e-5` contra NumPy float64 construido desde los inputs
-ya cuantizados a float32. OpenCL y Vulkan pasan esa comparación en los 48 grupos
-de cada backend. CUDA presenta un elemento fuera de tolerancia en cada uno de
-estos tres grupos, **con y sin padding**:
+`rtol=5e-5, atol=5e-5` is retained against NumPy float64 built from inputs
+already quantized to float32. OpenCL and Vulkan pass that comparison in all 48 groups
+per backend. CUDA has one element outside tolerance in each of
+these three groups, **with and without padding**:
 
-- Semilla 972, `(1024,8191) @ (8191,1024)`.
-- Semillas 972 y 973, `(65,8191) @ (8191,2051)`.
+- Seed 972, `(1024,8191) @ (8191,1024)`.
+- Seeds 972 and 973, `(65,8191) @ (8191,2051)`.
 
-Para semilla 972 y la segunda forma, el elemento `[16,653]` es
-`0.05214071273803711`, frente a `0.05208303933545566` en la referencia. Reproducir
-en CPU los productos y la suma secuencial redondeados a float32 da exactamente
-el valor CUDA. Es evidencia de acumulación/redondeo con K largo y cancelación,
-no de corrupción introducida por el relleno. Mejorar esta acumulación queda como
-trabajo independiente; no se cambió FMA ni se relajó el umbral.
+For seed 972 and the second shape, element `[16,653]` is
+`0.05214071273803711`, versus `0.05208303933545566` in the reference. Reproducing
+the float32-rounded products and sequential sum on the CPU gives exactly
+the CUDA value. This is evidence of accumulation/rounding with long K and cancellation,
+not corruption introduced by padding. Improving this accumulation remains
+independent work; FMA was not changed and the threshold was not relaxed.
 
-En la suite principal, el máximo error absoluto es 1,518e-4 en OpenCL/Vulkan y
-1,613e-4 en CUDA; el máximo error relativo L2 es aproximadamente 1,630e-6. Una
-métrica global pequeña puede coexistir con un elemento fuera de tolerancia.
-Ver también el [seguimiento numérico](numerical-accuracy.md).
+In the main suite, maximum absolute error is 1.518e-4 on OpenCL/Vulkan and
+1.613e-4 on CUDA; maximum relative L2 error is approximately 1.630e-6. A
+small global metric can coexist with an element outside tolerance.
+See also the [numerical follow-up](numerical-accuracy.md).
 
-Los 28 grupos del seguimiento también conservan los bits entre modalidades y
-pasan el umbral con sus semillas. Sus máximos errores absolutos son 1,691e-4
-en OpenCL y 1,634e-4 en CUDA; error relativo L2 máximo de aproximadamente 1,629e-6.
-En total hay **172 grupos y 30.960 muestras**, con 22 formas distintas; el caso
-principal aparece en ambas suites con inputs distintos. El seguimiento no
-elimina los tres fallos de tolerancia registrados en la suite principal.
+All 28 follow-up groups also preserve bits between modes and
+pass the threshold with their seeds. Their maximum absolute errors are 1.691e-4
+on OpenCL and 1.634e-4 on CUDA; maximum relative L2 error is approximately 1.629e-6.
+In total there are **172 groups and 30,960 samples**, with 22 distinct shapes; the main
+case appears in both suites with different inputs. The follow-up does not
+remove the three tolerance failures recorded in the main suite.
 
-La primera tentativa de la segunda ronda CUDA se detuvo en el control sin
-padding por esa tolerancia. Se conserva ese informe incompleto y se excluye de
-las tablas. El worker se ajustó para registrar violaciones finitas y continuar
-los demás modos, manteniendo datos, flags y tolerancias. Ahora `complete` indica
-ejecución terminada y `all_reference_close` indica precisión; no son equivalentes.
+The first attempt at the second CUDA round stopped in the unpadded
+control because of that tolerance. The incomplete report is retained and excluded from
+the tables. The worker was adjusted to record finite violations and continue
+other modes, preserving data, flags and tolerances. Now `complete` indicates
+completed execution and `all_reference_close` indicates accuracy; they are not equivalent.
 
-## Método y reproducción
+## Method and reproduction
 
-La suite principal tiene 16 formas, tres backends y tres semillas: nueve procesos
-completos, 144 grupos, 432 modalidades y **25.920 muestras cronometradas**. Cada
-grupo usa tres planes independientes (`off-a`, `on`, `off-b`), los mismos inputs,
-30 muestras por modalidad y ámbito, y los seis órdenes posibles con igual
-frecuencia. Preparación, calentamiento mínimo de 0,25 s, referencias, validación
-y telemetría quedan fuera del reloj. Se guarda cada muestra y el hash del código.
+The main suite has 16 shapes, three backends and three seeds: nine complete
+processes, 144 groups, 432 modes and **25,920 timed samples**. Each
+group uses three independent plans (`off-a`, `on`, `off-b`), the same inputs,
+30 samples per mode and scope, and all six possible orders with equal
+frequency. Preparation, a minimum warmup of 0.25 s, references, validation
+and telemetry are outside the clock. Every sample and the code hash are saved.
 
-Los procesos GPU son secuenciales. Antes de cada proceso se observa al menos
-10 s de reposo, tres lecturas consecutivas con utilización GPU/memoria de hasta
-5%, temperatura de hasta 52 °C y dentro de 2 °C de la referencia de reposo; se
-espera hasta 300 s sin saltar el control. El orden de backends y casos varía.
-Las trece esperas previas seleccionadas duraron entre 10,4 y 62,2 segundos.
-Estos controles no fijan frecuencias ni garantizan equilibrio térmico durante
-toda la ejecución. Las medidas son de pared, no tiempo puro del dispositivo.
+GPU processes are sequential. Before each process, at least
+10 s of idle time is observed, three consecutive readings with GPU/memory utilization up to
+5%, temperature up to 52 °C and within 2 °C of the idle reference;
+the wait is up to 300 s without skipping the control. Backend and case order varies.
+The thirteen selected preflight waits lasted between 10.4 and 62.2 seconds.
+These controls do not lock frequencies or guarantee thermal equilibrium throughout
+the run. Measurements are wall times, not pure device times.
 
 ```bash
 python -m benchmarks.isolated --worker padding_decision --backends opencl,vulkan,cuda-custom --rounds 3 --repeats 30 --seed 971 --max-wait-seconds 300 --max-temperature 52 --output .artifacts/padding-decision/reproduction
 ```
 
-Requiere los runtimes GPU y el compilador Vulkan configurados como las otras
-suites. El worker también acepta `--case-indices` al ejecutarse directamente;
-por ejemplo, el índice 10 selecciona la forma favorable. El nuevo benchmark
-registra violaciones numéricas sin abortar las otras modalidades; su código de
-salida por ejecución completada **no certifica** `all_reference_close`.
+GPU runtimes and the Vulkan compiler must be configured as for other
+suites. The worker also accepts `--case-indices` when run directly;
+for example, index 10 selects the favorable shape. The new benchmark
+records numerical violations without aborting other modes; its exit code
+for completed execution **does not certify** `all_reference_close`.
 
-Los resultados locales principales están en `.artifacts/padding-decision/broad`
-(solo ronda 1) y `continuation` (rondas 2 y 3). `broad/2-cuda-custom.json` es la
-tentativa incompleta excluida. `final-metrics.json` conserva la selección y hashes
-de informes. Los datos crudos y herramientas privadas no se incluyen en el wheel.
+Main local results are in `.artifacts/padding-decision/broad`
+(round 1 only) and `continuation` (rounds 2 and 3). `broad/2-cuda-custom.json` is the
+excluded incomplete attempt. `final-metrics.json` retains report selection and
+hashes. Raw data and private tools are not included in the wheel.
 
-El seguimiento está en `.artifacts/padding-decision/neighbors`. Su adaptador
-`neighbor_worker.py` llama al mismo `benchmarks.padding_decision.run` con las
-siete formas de la tabla, en ese orden, semillas 971 y 972 y 30 muestras. Los
-inputs se generan con `default_rng(semilla * 101 + índice_de_forma)` y uniformes
-en `[-0.5,0.5)` convertidos a float32. Por eso el caso repetido, de índice 0 aquí
-y 10 en la suite principal, tiene otros valores. Los hashes identifican tanto
-el worker compartido como el adaptador de formas.
+The follow-up is in `.artifacts/padding-decision/neighbors`. Its adapter
+`neighbor_worker.py` calls the same `benchmarks.padding_decision.run` with the
+seven table shapes in that order, seeds 971 and 972 and 30 samples. Inputs
+are generated with `default_rng(seed * 101 + shape_index)` and uniforms
+in `[-0.5,0.5)` converted to float32. Thus the repeated case, index 0 here
+and 10 in the main suite, has different values. Hashes identify both
+the shared worker and shape adapter.
 
-También se corrigieron literales `0.0` a `0.0f` en el generador **experimental**
-de `benchmarks.kernel_variants`, donde permanecía la misma promoción accidental.
-La prueba de los tres lenguajes protege esa base para futuros experimentos; el
-benchmark de esta decisión usa el generador del runtime, que ya estaba corregido.
+Literals `0.0` were also corrected to `0.0f` in the **experimental**
+`benchmarks.kernel_variants` generator, where the same accidental promotion remained.
+The three-language test protects that baseline for future experiments; the
+benchmark for this decision uses the runtime generator, which was already corrected.
 
-## Decisión y siguiente prioridad
+## Decision and next priority
 
-Mantener el contrato actual y `False` por defecto. Recomendar `True` únicamente
-después de medir el workload completo y su memoria; en este equipo, no hay razón
-para recomendarlo en Vulkan. No introducir una heurística automática a partir de
-una sola GPU, ni extrapolar a todos los productos con K largo.
+Keep the current contract and `False` by default. Recommend `True` only
+after measuring the complete workload and its memory; on this machine, there is no reason
+to recommend it for Vulkan. Do not introduce an automatic heuristic from
+a single GPU or extrapolate to all long-K products.
 
-La siguiente prioridad es mejorar el GEMM sin padding para formas rectangulares
-y su precisión de acumulación. Alineación de accesos, tratamiento de bordes y
-selección de tiles pueden capturar parte del beneficio sin materializar entradas
-completas. Esta ronda cambia a la vez stride, guardas y envío, por lo que no
-atribuye toda la mejora a eliminar branches. Tampoco constituye un límite físico
-de ningún backend. La posible extensión a `mean` sigue [anotada](padding.md#extensión-futura-reducciones),
-sin implementación ni prioridad adicional en esta ronda.
+The next priority is improving unpadded GEMM for rectangular shapes
+and its accumulation accuracy. Access alignment, edge handling and
+tile selection can capture some of the benefit without materializing complete
+inputs. This round changes stride, guards and submission together, so it does not
+attribute the entire improvement to removing branches. Nor does it constitute a physical
+limit for any backend. The possible extension to `mean` remains [noted](padding.md#future-extension-reductions),
+with no implementation or additional priority in this round.

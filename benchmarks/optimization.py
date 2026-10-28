@@ -134,13 +134,13 @@ def main():
     metadata["telemetry_end"] = telemetry()
     (args.output / "raw.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
     lines = [
-        "# Optimización: comparación en la misma sesión",
+        "# Optimization: comparison in the same session",
         "",
         metadata["policy"],
         "",
-        "Medianas end-to-end en ms (CPU sin copias artificiales).",
+        "End-to-end medians in ms (no artificial CPU copies).",
         "",
-        "| Caso | NumPy | Anterior | Custom | Fusionado | CLBlast |",
+        "| Case | NumPy | Previous | Custom | Fused | CLBlast |",
         "| --- | ---: | ---: | ---: | ---: | ---: |",
     ]
     for case in sorted(cases, key=lambda c: c.id):
@@ -155,16 +155,16 @@ def main():
         lines.append(f"| {case.id} | {' | '.join(values)} |")
     lines += [
         "",
-        f"Errores: {result['errors']}",
-        f"Fuentes sin cambios: {metadata['source_unchanged']}",
+        f"Errors: {result['errors']}",
+        f"Sources unchanged: {metadata['source_unchanged']}",
         "",
         (
-            "Solvers: matrices SPD tridiagonales almacenadas y procesadas densas. "
-            "No compara con un solver disperso especializado. Convergencia y residuo "
-            "se validan; las iteraciones pueden variar por redondeo."
+            "Solvers: SPD tridiagonal matrices stored and processed as dense matrices. "
+            "This does not compare against a specialized sparse solver. Convergence and "
+            "residuals are validated; iteration counts may vary due to rounding."
         ),
         "",
-        "Muestras, validaciones, tiempos residentes y hashes: [raw.json](raw.json).",
+        "Samples, validation, resident timings, and hashes: [raw.json](raw.json).",
     ]
     (args.output / "REPORT.md").write_text("\n".join(lines), encoding="utf-8")
     print(f"Done: {len(result['rows'])} rows, {len(result['errors'])} errors", flush=True)

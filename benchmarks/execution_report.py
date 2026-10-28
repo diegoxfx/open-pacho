@@ -77,145 +77,145 @@ def render(inputs, output, artifacts):
     m = milliseconds
     solver_count = sum(row["case"].endswith("_solve") for row in rows)
     lines = [
-        "# Compilador, Vulkan y referencias CUDA: resultados locales",
+        "# Compiler, Vulkan, and CUDA references: local results",
         "",
         (
-            f"Plataforma: {reports[0]['platform']}. Dispositivos: {reports[0]['devices']}. "
-            "La sesión original del 2026-09-06 corresponde a Windows 11, RTX 5060 Ti "
-            "16 GB (driver 616.64), Ryzen 7 5700X3D y 32 GB RAM. "
-            "No se ha validado AMD/Intel."
+            f"Platform: {reports[0]['platform']}. Devices: {reports[0]['devices']}. "
+            "The original session on 2026-09-06 used Windows 11, RTX 5060 Ti "
+            "16 GB (driver 616.64), Ryzen 7 5700X3D, and 32 GB RAM. "
+            "AMD/Intel have not been validated."
         ),
         "",
         (
-            f"**{len(rows)} configuraciones, siete rondas por modo, cero errores de validación.** "
-            f"{len(rows) - solver_count} de operaciones/pasos y {solver_count} de solvers completos. "
-            "Los JSON conservan todas las muestras; el CSV añade cuartiles."
+            f"**{len(rows)} configurations, seven rounds per mode, zero validation errors.** "
+            f"{len(rows) - solver_count} operation/step configurations and {solver_count} complete solves. "
+            "JSON preserves every sample; CSV adds quartiles."
         ),
         "",
-        "## Qué cambia y qué sigue costando",
+        "## What changes and which costs remain",
         "",
         (
-            f"100 actualizaciones de 1 048 576 valores float32: {m('updates100', 1048576)} ms "
-            f"en el mejor NumPy, {m('updates100', 1048576, 'opencl-eager')} ms en OpenCL directo, "
-            f"{m('updates100', 1048576, 'opencl-compiled')} ms con compile y "
-            f"{m('updates100', 1048576, 'cupy')} ms en CuPy. "
-            f"Incluyendo transferencias: {m('updates100', 1048576, mode='end_to_end')} ms "
-            f"NumPy y {m('updates100', 1048576, 'opencl-compiled', 'end_to_end')} ms OpenCL compilado."
+            f"100 updates of 1,048,576 float32 values: {m('updates100', 1048576)} ms "
+            f"for the best NumPy result, {m('updates100', 1048576, 'opencl-eager')} ms for eager OpenCL, "
+            f"{m('updates100', 1048576, 'opencl-compiled')} ms with compile, and "
+            f"{m('updates100', 1048576, 'cupy')} ms for CuPy. "
+            f"Including transfers: {m('updates100', 1048576, mode='end_to_end')} ms "
+            f"NumPy and {m('updates100', 1048576, 'opencl-compiled', 'end_to_end')} ms compiled OpenCL."
         ),
         "",
         (
-            f"Matmul 2048×2048 float32: {m('matmul', 2048)} ms en NumPy, "
+            f"Matmul 2048×2048 float32: {m('matmul', 2048)} ms NumPy, "
             f"{m('matmul', 2048, 'opencl-clblast-compiled')} ms OpenCL+CLBlast, "
-            f"{m('matmul', 2048, 'cublas')} ms cuBLAS y {m('matmul', 2048, 'nvmath')} ms nvmath. "
-            "La ventaja principal aquí viene del proveedor matricial: compilar un matmul "
-            "aislado no lo fusiona ni mejora necesariamente su kernel."
+            f"{m('matmul', 2048, 'cublas')} ms cuBLAS and {m('matmul', 2048, 'nvmath')} ms nvmath. "
+            "The main advantage here comes from the matrix provider: compiling an isolated "
+            "matmul neither fuses it nor necessarily improves its kernel."
         ),
         "",
         (
-            f"Jacobi completo a 2048 float32: {m('jacobi_solve', 2048)} ms NumPy, "
-            f"{m('jacobi_solve', 2048, 'opencl-solver')} ms OpenCL custom y "
-            f"{m('jacobi_solve', 2048, 'cupy')} ms CuPy. Descenso más pronunciado: "
-            f"{m('sd_solve', 2048)} ms NumPy, {m('sd_solve', 2048, 'opencl-solver')} ms OpenCL y "
-            f"{m('sd_solve', 2048, 'cupy')} ms CuPy. Son tiempos residentes: la transferencia "
-            "no es la única causa de las diferencias. Hay GEMV/DOT, despacho, asignaciones "
-            "y sincronización para convergencia. CLBlast por sí solo no resuelve el algoritmo."
+            f"Complete Jacobi solve at 2048 float32: {m('jacobi_solve', 2048)} ms NumPy, "
+            f"{m('jacobi_solve', 2048, 'opencl-solver')} ms custom OpenCL and "
+            f"{m('jacobi_solve', 2048, 'cupy')} ms CuPy. Steepest descent: "
+            f"{m('sd_solve', 2048)} ms NumPy, {m('sd_solve', 2048, 'opencl-solver')} ms OpenCL and "
+            f"{m('sd_solve', 2048, 'cupy')} ms CuPy. These are resident timings: transfers "
+            "are not the only source of differences. GEMV/DOT, dispatch, allocations, "
+            "and convergence synchronization remain. CLBlast alone does not solve the algorithm."
         ),
         "",
         (
-            f"Vulkan: matmul 2048 float32 residente {m('matmul', 2048, 'vulkan-compiled')} ms, "
-            f"con transferencias {m('matmul', 2048, 'vulkan-compiled', 'end_to_end')} ms; "
-            f"100 actualizaciones grandes, {m('updates100', 1048576, 'vulkan-compiled')} ms. "
-            "Es funcional; faltan pool, fusión y menor coste de envío. Estos números "
-            "no representan un límite de Vulkan como tecnología."
+            f"Vulkan: resident matmul 2048 float32 {m('matmul', 2048, 'vulkan-compiled')} ms, "
+            f"with transfers {m('matmul', 2048, 'vulkan-compiled', 'end_to_end')} ms; "
+            f"100 large updates, {m('updates100', 1048576, 'vulkan-compiled')} ms. "
+            "It works; pooling, fusion, and lower submission overhead are still missing. "
+            "These numbers do not represent a limit of Vulkan as a technology."
         ),
         "",
         (
-            f"100 actualizaciones de solo 256 valores: {m('updates100', 256)} ms NumPy y "
-            f"{m('updates100', 256, 'opencl-compiled')} ms OpenCL compilado. La corrección "
-            "se conserva; no se prioriza hacer que GPU gane este caso."
+            f"100 updates of only 256 values: {m('updates100', 256)} ms NumPy and "
+            f"{m('updates100', 256, 'opencl-compiled')} ms compiled OpenCL. Correctness "
+            "is preserved; making the GPU win this case is not a priority."
         ),
         "",
-        "## Método y límites de comparación",
+        "## Method and comparison limits",
         "",
         (
-            "- Tiempo de pared sincronizado, con despacho Python y asignación de resultados. "
-            "Rondas con orden aleatorio de implementaciones. No se usan tiempos de lanzamiento asincrónico como cómputo completo."
+            "- Synchronized wall time, including Python dispatch and result allocation. "
+            "Implementation order is randomized across rounds. Asynchronous launch times are not reported as complete computation."
         ),
         (
-            "- Residente: inputs ya cargados, planes preparados y kernels calentados. "
-            "Cada repetición reinicia el estado lógico de las iteraciones. "
-            "La validación y descarga del resultado quedan fuera de este tiempo."
+            "- Resident: inputs already uploaded, plans prepared, and kernels warmed up. "
+            "Each repetition resets the iterations' logical state. "
+            "Validation and result download are outside this timing."
         ),
         (
-            "- Con transferencias: nuevos buffers de entrada, cómputo y descarga. "
-            "Se reutilizan planes/programas; nvmath reenlaza operandos sin planificar otra vez. "
-            "NumPy usa los arrays host existentes: no se le añade una copia artificial."
+            "- With transfers: new input buffers, computation, and download. "
+            "Plans/programs are reused; nvmath rebinds operands without replanning. "
+            "NumPy uses existing host arrays: no artificial copy is added."
         ),
         (
-            "- Los JSON separan subida, planificación, primera ejecución y descarga. "
-            "La primera ejecución es de esa configuración dentro del proceso; "
-            "puede reutilizar cachés de configuraciones anteriores. No mide un proceso "
-            "frío independiente ni incluye inicialización del dispositivo. "
-            "La captura de OpenPacho está incluida en su primera ejecución; la "
-            "planificación explícita de nvmath figura separada."
+            "- JSON separates upload, planning, first execution, and download. "
+            "First execution refers to that configuration within the process; "
+            "it may reuse caches from earlier configurations. It does not measure "
+            "an independent cold process or include device initialization. "
+            "OpenPacho capture is included in its first execution; explicit "
+            "nvmath planning is reported separately."
         ),
         (
-            "- NumPy se mide con BLAS limitado a 1, 8 y 16 hilos. Las tablas muestran "
-            "la mejor mediana por caso y modo. Las operaciones sin BLAS no se "
-            "paralelizan por cambiar ese límite; diferencias pequeñas ahí son ruido."
+            "- NumPy is measured with BLAS limited to 1, 8, and 16 threads. Tables show "
+            "the best median for each case and mode. Changing that limit does not "
+            "parallelize non-BLAS operations; small differences there are noise."
         ),
         (
-            "- float32/float64 originales, TF32 deshabilitado; nvmath usa COMPUTE_32F/64F. "
-            "Se comprueban forma, dtype y valores en cada ronda. No se exige identidad bit a bit."
+            "- Original float32/float64, TF32 disabled; nvmath uses COMPUTE_32F/64F. "
+            "Shape, dtype, and values are checked in every round. Bitwise identity is not required."
         ),
         (
-            "- `updates100`: x=(1-tasa)*x+tasa*b, cien pasos. `energy`: "
-            "sum((2*(a*b+c))²,axis=-1), arrays tamaño×32. Jacobi20 y gradient20 usan "
-            "20 pasos de una matriz SPD densa dominante; gradient20 usa tasa fija."
+            "- `updates100`: x=(1-rate)*x+rate*b, one hundred steps. `energy`: "
+            "sum((2*(a*b+c))²,axis=-1), size×32 arrays. Jacobi20 and gradient20 use "
+            "20 steps with a dense diagonally dominant SPD matrix; gradient20 uses a fixed rate."
         ),
         (
-            "- Los casos `_solve` ejecutan los solvers de examples/solvers.py hasta convergencia, "
-            "con residuo real en cada iteración, rtol=1e-4/1e-7 para float32/64 y "
-            "maxiter=400. El descenso más pronunciado usa búsqueda exacta de paso. "
-            "NumPy/CuPy ejecutan la misma recurrencia mediante operaciones nativas "
-            "de `benchmarks.suite.native_solver`. Los coeficientes escalares pueden "
-            "tener rutas/precisión intermedia diferentes. Se valida además el residuo host "
-            "contra la tolerancia (margen de 2 % por orden de reducción). "
-            "Los inputs son sistemas tridiagonales almacenados densamente; no es una prueba sparse."
+            "- `_solve` cases run solvers from examples/solvers.py to convergence, "
+            "with the true residual at each iteration, rtol=1e-4/1e-7 for float32/64 and "
+            "maxiter=400. Steepest descent uses an exact line search. "
+            "NumPy/CuPy execute the same recurrence through native operations "
+            "in `benchmarks.suite.native_solver`. Scalar coefficients may use "
+            "different paths/intermediate precision. The host residual is also checked "
+            "against the tolerance (a 2% margin for reduction order). "
+            "Inputs are tridiagonal systems stored densely; this is not a sparse benchmark."
         ),
         (
-            "- CUDA es la plataforma. La referencia concreta cuBLAS usa bindings directos; "
-            "CuPy matmul también puede usar cuBLAS y nvmath utiliza cuBLASLt. "
-            "No son tres dispositivos independientes. cuBLAS/nvmath se comparan solo "
-            "en matmul; no se inventa un solver de alto nivel para esas interfaces."
+            "- CUDA is the platform. The cuBLAS reference uses direct bindings; "
+            "CuPy matmul may also use cuBLAS, and nvmath uses cuBLASLt. "
+            "These are not three independent devices. cuBLAS/nvmath are compared "
+            "only for matmul; no high-level solver is invented for those interfaces."
         ),
         (
-            "- No se midieron PyTorch/JAX, uso máximo de memoria, energía, todas las "
-            "formas rectangulares ni portabilidad de rendimiento entre fabricantes. "
-            "Esta batería cubre el alcance actual; no constituye todos los workloads posibles."
+            "- PyTorch/JAX, peak memory usage, energy, every rectangular shape, "
+            "and performance portability across vendors were not measured. "
+            "This suite covers the current scope, not every possible workload."
         ),
         "",
     ]
     lines += [
-        "## Tiempos residentes",
+        "## Resident timings",
         "",
         (
-            "Milisegundos; menor es mejor. OpenPacho usa compile en operaciones/pasos; "
-            "en `_solve`, el solver medido ya compila sus actualizaciones. "
-            "Los modos eager y compilado completos están en el JSON/CSV."
+            "Milliseconds; lower is better. OpenPacho uses compile for operations/steps; "
+            "in `_solve`, the measured solver already compiles its updates. "
+            "Complete eager and compiled results are available in JSON/CSV."
         ),
         "",
     ]
     for mode in ("resident", "end_to_end"):
         if mode == "end_to_end":
             lines += [
-                "## Carga + cómputo + descarga",
+                "## Upload + compute + download",
                 "",
-                "Milisegundos; planes y programas calientes.",
+                "Milliseconds; warmed-up plans and programs.",
                 "",
             ]
         lines += [
-            "| Caso / tamaño / dtype | NumPy mejor | " + " | ".join(labels) + " |",
+            "| Case / size / dtype | Best NumPy | " + " | ".join(labels) + " |",
             "| --- | " + " | ".join(["---:"] * 7) + " |",
         ]
         for key in keys:
@@ -232,47 +232,47 @@ def render(inputs, output, artifacts):
             lines.append(f"| {key[0]} / {key[1]} / {key[2]} | " + " | ".join(values) + " |")
         lines.append("")
     lines += [
-        "## Prioridad siguiente",
+        "## Next priorities",
         "",
         (
-            "1. Reducir sincronizaciones y coste de ejecución en solvers sin cambiar "
-            "silenciosamente su frecuencia de comprobación o tolerancias; optimizar GEMV/DOT."
+            "1. Reduce synchronization and execution costs in solvers without silently "
+            "changing their check frequency or tolerances; optimize GEMV/DOT."
         ),
         (
-            "2. Fusionar map-reduce y mejorar decisiones sobre temporales compartidos. "
-            "Medir un ejecutor con menor overhead cuando domine Python."
+            "2. Fuse map-reduce and improve decisions about shared temporaries. "
+            "Measure an executor with lower overhead when Python dominates."
         ),
         (
-            "3. Pool y fusión Vulkan, reutilización de descriptores/comandos y kernels "
-            "matriciales optimizados. Verificar un segundo fabricante."
+            "3. Vulkan pooling and fusion, descriptor/command reuse, and optimized "
+            "matrix kernels. Validate a second vendor."
         ),
         (
-            "4. Ampliar operaciones frecuentes, como matmul por lotes, según casos reales. "
-            "Mantener CLBlast y kernels custom intercambiables por contrato; "
-            "CUDA backend y dispersas siguen como trabajo futuro."
+            "4. Extend frequent operations, such as batched matmul, based on real use cases. "
+            "Keep CLBlast and custom kernels interchangeable under the contract; "
+            "a CUDA backend and sparse operations remain future work."
         ),
         "",
-        "## Reproducir",
+        "## Reproduce",
         "",
         "```powershell",
         "$env:PYOPENCL_NO_CACHE='1'",
-        "$env:PACHO_VULKAN_COMPILER='<ruta a glslang o glslc>'",
-        "$env:OPENPACHO_CLBLAST_LIBRARY='<ruta a CLBlast>'",
+        "$env:PACHO_VULKAN_COMPILER='<path to glslang or glslc>'",
+        "$env:OPENPACHO_CLBLAST_LIBRARY='<path to CLBlast>'",
         "python -m benchmarks.execution --repeats 7 --output .artifacts/benchmarks/execution/raw.json",
         "python -m benchmarks.execution --solvers-only --repeats 7 --output .artifacts/benchmarks/execution-solvers/raw.json",
         "python -m benchmarks.execution_report --inputs .artifacts/benchmarks/execution/raw.json .artifacts/benchmarks/execution-solvers/raw.json --output docs/execution-results.md --artifacts .artifacts/benchmarks/execution-report",
         "```",
         "",
         (
-            "Dependencias adicionales: extra benchmark, CuPy y nvmath-python con componentes "
-            "CUDA compatibles, CLBlast nativo, bindings Vulkan y compilador de shaders. "
-            "No forman parte de las dependencias mínimas CPU de OpenPacho."
+            "Additional dependencies: the benchmark extra, CuPy and nvmath-python with "
+            "compatible CUDA components, native CLBlast, Vulkan bindings, and a shader compiler. "
+            "These are not part of OpenPacho's minimal CPU dependencies."
         ),
         "",
-        "Versiones medidas: "
+        "Measured versions: "
         + ", ".join(f"{name} {version}" for name, version in reports[0]["versions"].items())
         + ".",
-        "Los artefactos locales originales están en "
+        "Original local artifacts are in "
         + ", ".join(str(p.parent).replace("\\", "/") for p in inputs)
         + ".",
         "",
@@ -298,10 +298,10 @@ def render(inputs, output, artifacts):
         for j in range(4):
             ax.text(j, i, f"{ratios[i, j]:.3g}×", ha="center", va="center", fontsize=9)
     ax.set_title(
-        "Velocidad residente respecto al mejor NumPy\n>1× gana; <1× pierde · 7 rondas · RTX 5060 Ti",
+        "Resident speed relative to the best NumPy result\n>1× wins; <1× loses · 7 rounds · RTX 5060 Ti",
         pad=20,
     )
-    fig.colorbar(chart, ax=ax, label="log₂(velocidad relativa a NumPy)", shrink=0.65)
+    fig.colorbar(chart, ax=ax, label="log₂(speed relative to NumPy)", shrink=0.65)
     fig.tight_layout()
     fig.savefig(artifacts / "resident-speedups.png", dpi=160)
     fig.savefig(artifacts / "resident-speedups.svg")

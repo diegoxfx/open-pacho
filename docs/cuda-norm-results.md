@@ -1,92 +1,92 @@
-# Normas estables CUDA y clientes externos
+# Stable CUDA norms and external clients
 
-Fecha: 2026-10-22. Validación local en Windows, Python 3.12.14,
-NVIDIA RTX 5060 Ti, driver 617.14. La versión continúa siendo `0.1.0a1`.
+Date: 2026-10-22. Local validation on Windows, Python 3.12.14,
+NVIDIA RTX 5060 Ti, driver 617.14. The version remains `0.1.0a1`.
 
-## Por qué esta iteración
+## Why this iteration
 
-CUDA podía multiplicar matrices y reducir arrays, pero no calcular una norma
-estable. Eso impedía usar una primitiva común para magnitudes, normalización y
-residuos, y bloqueaba los solvers externos. Reutilizar el algoritmo escalado
-existente aporta más utilidad que otra microoptimización de ganancias marginales.
-No añade algoritmos de dominio al paquete ni una dependencia nueva.
+CUDA could multiply matrices and reduce arrays, but could not compute a stable
+norm. This prevented using a common primitive for magnitudes, normalization, and
+residuals, and blocked external solvers. Reusing the existing scaled algorithm
+provides more utility than another microoptimization with marginal gains.
+It adds neither domain algorithms to the package nor a new dependency.
 
-## Implementación y contrato
+## Implementation and contract
 
-`_norm.py` comparte la combinación de pares `(scale, ssq)` entre OpenCL, Vulkan
-y CUDA. CUDA añade únicamente su fuente y lanzamiento: 128 hilos, memoria
-compartida y bloques de hasta 4096 términos. Los parciales permanecen en GPU;
-no se calcula el cuadrado de una entrada extrema antes de escalarla.
+`_norm.py` shares combination of `(scale, ssq)` pairs across OpenCL, Vulkan,
+and CUDA. CUDA adds only its source and launch: 128 threads, shared
+memory, and blocks of up to 4096 terms. Partials remain on the GPU;
+an extreme input is not squared before being scaled.
 
-`pacho.linalg.norm` y `np.linalg.norm` admiten el mismo subconjunto euclídeo y
-Frobenius en float32/64, tanto eager como con `compile`. La norma conserva dtype
-y backend, admite los ejes y `keepdims` existentes y funciona con los dos
-proveedores CUDA. La elección `blas` sigue afectando a productos matriciales;
-la norma usa el kernel propio compartido. NaN domina a infinito y una reducción
-vacía devuelve cero. El rango del dtype y los subnormales siguen siendo límites.
+`pacho.linalg.norm` and `np.linalg.norm` support the same Euclidean and
+Frobenius subset in float32/64, both eager and with `compile`. The norm preserves dtype
+and backend, supports existing axes and `keepdims`, and works with both
+CUDA providers. The `blas` choice still affects matrix products;
+the norm uses the shared custom kernel. NaN dominates infinity and an empty
+reduction returns zero. Dtype range and subnormals remain limits.
 
-Los solvers de `examples/solvers.py` ya pueden usar CUDA, incluidas sus formas
-preparadas. Se conservan recurrencias, tolerancias y chequeo de residuo verdadero
-en cada iteración. La validación cuenta entradas no finitas con un acumulador
-flotante explícito y exige cero: no necesita contar exactamente todos los
-elementos de un array grande ni requiere int64 en CUDA. CPU conserva validación
-eager. Los solvers siguen fuera del wheel y de la API de la biblioteca.
+Solvers in `examples/solvers.py` can now use CUDA, including their prepared
+forms. Recurrences, tolerances, and true-residual checks
+at every iteration are retained. Validation counts nonfinite inputs with an explicit
+floating accumulator and requires zero: it does not need to count exactly every
+element of a large array or require int64 in CUDA. CPU retains eager
+validation. Solvers remain outside the wheel and library API.
 
-## Evidencia numérica
+## Numerical evidence
 
-Se ejecutaron los **52 casos existentes de normas y solvers** de
-`benchmarks.accuracy` correspondientes a `cuda-custom` y `cuda-cublas`, con
-referencia Decimal80 sobre los inputs representados y sin cambiar umbrales.
-No hubo excepciones ni exclusiones por falta de operación.
+The **52 existing norm and solver cases** in
+`benchmarks.accuracy` corresponding to `cuda-custom` and `cuda-cublas` were run, with
+Decimal80 references on represented inputs and unchanged thresholds.
+There were no exceptions or exclusions for missing operations.
 
-Las ocho normas extremas pasan. El mayor error relativo observado fue
-**4,52e-8 en float32** y **6,24e-17 en float64**; ambos proveedores usan el mismo
-kernel y dieron los mismos resultados. Los 36 casos de sistemas ordinarios,
-RHS pequeño y RHS grande también pasan el diagnóstico y convergen.
+The eight extreme norms pass. The largest relative error observed was
+**4.52e-8 in float32** and **6.24e-17 in float64**; both providers use the same
+kernel and produced the same results. The 36 ordinary-system,
+small-RHS, and large-RHS cases also pass diagnostics and converge.
 
-Persisten **seis alertas de error hacia la solución** en sistemas de Hilbert:
-por proveedor, tamaños 4 y 8 en float32, y tamaño 8 en float64. Todos cumplen
-su criterio de residuo, pero el error relativo hacia la solución Decimal alcanza
-aproximadamente 0,0109, 0,9663 y 0,000150 respectivamente. Esto demuestra por qué
-un residuo pequeño no garantiza una solución precisa en un sistema mal
-condicionado. Las normas estables no resuelven ese problema ni las alertas
-anteriores de cancelación en GEMM. No se relajan tolerancias para ocultarlas.
+**Six forward-error warnings** persist for Hilbert systems:
+per provider, sizes 4 and 8 in float32, and size 8 in float64. All meet
+their residual criterion, but relative error against the Decimal solution reaches
+approximately 0.0109, 0.9663, and 0.000150 respectively. This demonstrates why
+a small residual does not guarantee an accurate solution in an ill-conditioned
+system. Stable norms resolve neither that problem nor the earlier GEMM cancellation
+warnings. Tolerances are not relaxed to hide them.
 
-Estos casos se usan para diagnóstico numérico. Sus tiempos pequeños, con una
-repetición, no fundamentan una afirmación de aceleración ni una comparación de
-proveedores.
+These cases are used for numerical diagnostics. Their small timings, with one
+repetition, support neither a speedup claim nor a provider
+comparison.
 
-## Reproducción y límites
+## Reproduction and limits
 
-Los inputs y referencias ya viven en `benchmarks/accuracy.py`. La ejecución
-completa se obtiene con:
+Inputs and references already live in `benchmarks/accuracy.py`. The complete
+run is obtained with:
 
 ```powershell
 python -m benchmarks.accuracy --backends cuda-custom,cuda-cublas --repeats 1 --output accuracy.json
 ```
 
-Ese comando también incluye suma/productos y conserva su salida no cero si hay
-alertas diagnósticas. Esta iteración limitó el trabajo a `norm` y `solve`;
-el script y JSON correspondientes están en
-`.artifacts/iterations-2026-10-22/verify_norm_accuracy.py` y
-`accuracy-cuda-{custom,cublas}.json`. Los artefactos privados no se distribuyen.
+That command also includes sums/products and retains its nonzero exit when
+there are diagnostic warnings. This iteration limited work to `norm` and `solve`;
+the corresponding script and JSON are in
+`.artifacts/iterations-2026-10-22/verify_norm_accuracy.py` and
+`accuracy-cuda-{custom,cublas}.json`. Private artifacts are not distributed.
 
-**257 pruebas dirigidas aprobadas**, con los tres backends GPU obligatorios y
-51 avisos del compilador PyOpenCL; no se ejecutó la suite global. El reporte
-está en `.artifacts/iterations-2026-10-22/norm-final-sys-tests.xml`.
-La revisión independiente final aprobó el lote después de corregir la
-regresión de instrumentación de la validación CPU y revisar esos resultados.
-Las pruebas funcionales cubren rangos extremos, vacíos, escalares, ejes
-irregulares, fronteras 4096/4097/8193, precedencia NaN/Inf entre bloques,
-ejecución compilada sin descargas y los flujos ordinario/preparado de los tres
-solvers. También se comprueban las rutas compartidas CPU/OpenCL/Vulkan.
+**257 targeted tests passed**, with all three GPU backends required and
+51 PyOpenCL compiler warnings; the global suite was not run. The report
+is in `.artifacts/iterations-2026-10-22/norm-final-sys-tests.xml`.
+Final independent review approved the batch after correcting the CPU validation
+instrumentation regression and reviewing those results.
+Functional tests cover extreme ranges, empty inputs, scalars, irregular
+axes, 4096/4097/8193 boundaries, NaN/Inf precedence across blocks,
+compiled execution without downloads, and ordinary/prepared flows for all three
+solvers. Shared CPU/OpenCL/Vulkan paths are also checked.
 
-La ejecución local encontró permisos insuficientes en el TEMP del sandbox al
-compilar Vulkan; se configuró TEMP/TMP en el directorio privado de artefactos y
-la ruta explícita al compilador GLSL instalado. También se observó una excepción
-nativa Windows `0xc0000008` dentro de NVRTC con captura de descriptores de pytest.
-El smoke que mezcla los cuatro backends y las suites CUDA en procesos separados
-pasaron. La suite integrada también pasó usando `--capture=sys` en lugar de
-capturar descriptores nativos. Se conserva esa opción para la verificación local;
-la causa interna de la excepción de NVRTC no está diagnosticada y no se atribuye
-a un fallo de aritmética ni se declara corregida en el driver.
+Local execution encountered insufficient permissions in the sandbox TEMP when
+compiling Vulkan; TEMP/TMP were configured in the private artifact directory and
+the explicit path to the installed GLSL compiler was set. A native Windows exception
+`0xc0000008` was also observed within NVRTC with pytest descriptor capture.
+The smoke test mixing all four backends and CUDA suites in separate processes
+passed. The integrated suite also passed using `--capture=sys` instead of
+capturing native descriptors. That option is retained for local verification;
+the internal cause of the NVRTC exception has not been diagnosed and is not attributed
+to an arithmetic error or declared fixed in the driver.

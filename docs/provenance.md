@@ -1,31 +1,34 @@
-# Procedencia y objetivo recuperado
+# Provenance and recovered objective
 
-Consulta realizada el 2026-09-06:
+Sources consulted on 2026-09-06:
 
 - [azapat47/pypacho](https://github.com/azapat47/pypacho), commit
-  `f34da092ad47f94ddd6c94005ecc1b6cd9b22982`. README, arrays OpenCL/CUDA, kernels,
-  métodos y laboratorios. Objetivo documentado: operaciones numéricas paralelas y
-  comparación de métodos iterativos por plataforma, tamaño y precisión.
-- [Publicación IEEE 9623197](https://ieeexplore.ieee.org/document/9623197): se pudo
-  verificar el título «PyPacho: A Python library that implements parallel basic
-  operations on GPUs». No se obtuvo el texto completo; no se han reconstruido sus
-  tablas ni confirmado los detalles experimentales del artículo.
+  `f34da092ad47f94ddd6c94005ecc1b6cd9b22982`. README, OpenCL/CUDA arrays, kernels,
+  methods, and labs. Documented objective: parallel numerical operations and
+  comparison of iterative methods by platform, size, and precision.
+- [IEEE publication 9623197](https://ieeexplore.ieee.org/document/9623197): the title
+  “PyPacho: A Python library that implements parallel basic
+  operations on GPUs” was verified. The full text was not obtained; its
+  tables have not been reconstructed, nor have the paper's experimental details
+  been confirmed.
 
-El usuario precisó que el objetivo principal es una biblioteca Python de GPU
-agnóstica al hardware y de migración sencilla desde NumPy. Esto fija la prioridad
-de OpenCL y de la compatibilidad de arrays por encima de backends exclusivos de un
-fabricante o una interfaz educativa.
+Diego Alejandro Cifuentes defined the main objective as a
+hardware-agnostic Python GPU library that makes migration from NumPy simple.
+This prioritizes OpenCL and array compatibility over vendor-exclusive backends
+or an educational interface.
 
-La nueva implementación se escribió desde cero. No se copiaron kernels ni clases
-de PyPacho. PyPacho no contiene un archivo de licencia en el commit inspeccionado.
-Se consulta como historia y evidencia del objetivo, no como una licencia
-implícita para redistribuir su código.
+OpenPacho is developed by Diego Alejandro Cifuentes, who coauthored PyPacho with
+Andrés Felipe Zapata Palacio, Esteban Echeverri Jaramillo, and Juan David Arcila Moreno.
+The new implementation was written from scratch. No PyPacho kernels or classes
+were copied. PyPacho contains no license file at the inspected commit.
+It is consulted as historical context and evidence of the objective, not as an
+implicit license to redistribute its code.
 
-Autores originales reconocidos en el README de PyPacho: Andrés Felipe Zapata
-Palacio, Esteban Echeverri Jaramillo, Diego Alejandro Cifuentes y Juan David Arcila Moreno.
+The original authors acknowledged in PyPacho's README are Andrés Felipe Zapata
+Palacio, Esteban Echeverri Jaramillo, Diego Alejandro Cifuentes, and Juan David Arcila Moreno.
 
-Referencias técnicas utilizadas para el diseño:
+Technical references used for the design:
 
-- [NumPy: custom array containers y dispatch](https://numpy.org/doc/stable/user/basics.dispatch.html).
-- [PyOpenCL: plataformas, dispositivos y contextos](https://documen.tician.de/pyopencl/runtime_platform.html).
-- [PyOpenCL: arrays y operaciones](https://documen.tician.de/pyopencl/array.html).
+- [NumPy: custom array containers and dispatch](https://numpy.org/doc/stable/user/basics.dispatch.html).
+- [PyOpenCL: platforms, devices, and contexts](https://documen.tician.de/pyopencl/runtime_platform.html).
+- [PyOpenCL: arrays and operations](https://documen.tician.de/pyopencl/array.html).

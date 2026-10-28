@@ -1,20 +1,20 @@
-# Vulkan: frontera CFFI tipada y diagnóstico — 2026-09-12
+# Vulkan: typed CFFI boundary and diagnostics — 2026-09-12
 
-## Resultado y alcance
+## Result and scope
 
-La tabla de comandos por dispositivo reduce el coste de los wrappers generados
-en llamadas frecuentes. Sigue siendo un ejecutor Python con llamadas CFFI; no
-se añadió una extensión C/C++ ni se reescribió el adaptador Vulkan completo.
-No cambia el API público de arrays, kernels de los workloads medidos, barreras,
-pools, número de envíos, chequeos de solvers ni precisión.
+The per-device command table reduces generated-wrapper costs in frequent calls.
+It remains a Python executor with CFFI calls; no C/C++ extension was added and
+the full Vulkan adapter was not rewritten. It does not change the public array
+API, kernels of measured workloads, barriers, pools, submission count, solver
+checks, or precision.
 
-Control local: RTX 5060 Ti, Windows 11, driver 616.64 y binding Vulkan 1.3.275.1.
-Dos procesos independientes, 30 casos por proceso, rutas wrapped/direct intercaladas
-con 21 muestras por modalidad. Incluye float32/64, rectangulares/impares,
-operaciones, aplicaciones, solvers hasta convergencia y transferencias escalares/grandes.
-Los rangos siguientes son las **dos medianas**, no intervalos de confianza.
+Local control: RTX 5060 Ti, Windows 11, driver 616.64, and Vulkan binding 1.3.275.1.
+Two independent processes, 30 cases per process, interleaved wrapped/direct paths
+with 21 samples per mode. Includes float32/64, rectangular/odd shapes, operations,
+applications, solvers to convergence, and scalar/large transfers.
+The following ranges are the **two medians**, not confidence intervals.
 
-| Caso | dtype | Wrapped ms | Direct ms | Reducción de tiempo |
+| Case | dtype | Wrapped ms | Direct ms | Time reduction |
 | --- | --- | ---: | ---: | ---: |
 | gemv 2049x1023 | float32 | 0.309–0.316 | 0.277–0.314 | -1.8–12.3 % |
 | gemv 2049x1023 | float64 | 0.353–0.366 | 0.335–0.338 | 5.2–7.7 % |
@@ -31,143 +31,146 @@ Los rangos siguientes son las **dos medianas**, no intervalos de confianza.
 | sd 513x513 | float32 | 30.513–32.963 | 25.049–26.119 | 17.9–20.8 % |
 | sd 513x513 | float64 | 57.564–59.371 | 46.700–48.915 | 17.6–18.9 % |
 
-En estos controles, los solvers reducen tiempo residente entre 14,7 y 22,0 %;
-ridge entre 20,8 y 24,0 %. GEMV float32 queda mixto entre procesos; la subida
-grande puede quedar igual o ligeramente peor. No se afirma una mejora universal.
+In these controls, solvers reduce resident time by 14.7–22.0%; ridge by
+20.8–24.0%. Float32 GEMV is mixed across processes; large uploads can remain
+unchanged or become slightly worse. No universal improvement is claimed.
 
-El modo completo también incluye subida, preparación y descarga. Para ridge
-4097×129 float32, las medianas completas son:
+Full mode also includes upload, preparation, and download. For ridge
+4097×129 float32, full medians are:
 
 - Wrapped: 7.514–8.054 ms.
 - Direct: 5.809–6.312 ms.
 
-Las transferencias aisladas miden el API de upload/download con staging y
-sincronización, no el ancho de banda PCIe puro. La tabla completa local
-(`.artifacts/vulkan-dispatch/comparison.csv`, no distribuida)
-conserva ambas corridas, todos los casos, errores L2 e iteraciones.
+Isolated transfers measure the upload/download API with staging and
+synchronization, not pure PCIe bandwidth. The complete local table
+(`.artifacts/vulkan-dispatch/comparison.csv`, not distributed) retains both runs,
+all cases, L2 errors, and iteration counts.
 
-## Qué cambió
+## What changed
 
-`_vulkan_commands.py` resuelve una tabla por VkDevice mediante
+`_vulkan_commands.py` resolves a table per VkDevice through
 [vkGetDeviceProcAddr](https://docs.vulkan.org/refpages/latest/refpages/source/vkGetDeviceProcAddr.html).
-El backend pasa handles, arrays nativos y NULL tipados: evita inspección/conversión
-genérica por argumento y utiliza entry points del dispositivo. Se mantiene el
-binding opcional existente para creación, asignación y otras llamadas.
+The backend passes typed handles, native arrays, and NULLs: it avoids generic
+per-argument inspection/conversion and uses device entry points. The existing
+optional binding is retained for creation, allocation, and other calls.
 
-- Las funciones VkResult comprueban errores y conservan excepciones del binding.
-- La tabla no modifica el módulo Vulkan global ni comparte punteros entre VkDevices.
-- `auto` usa wrappers si no puede resolver la ruta tipada; no cambia de backend.
-  Un error durante ejecución se propaga, sin reintento o fallback que lo oculte.
-- Comandos, leases, recursos en vuelo, locks, staging, barreras y límite de 64
-  operaciones conservan su contrato. No se relajan validaciones de entradas.
-- `_command_mode` es un control privado de constructor para diagnóstico, no una
-  configuración que el usuario necesite conocer para obtener la mejora.
+- VkResult functions check errors and preserve binding exceptions.
+- The table neither modifies the global Vulkan module nor shares pointers
+  between VkDevices.
+- `auto` uses wrappers if it cannot resolve the typed path; it does not switch
+  backend. An execution error propagates without a concealing retry or fallback.
+- Commands, leases, in-flight resources, locks, staging, barriers, and the
+  64-operation limit retain their contract. Input validation is not relaxed.
+- `_command_mode` is a private constructor control for diagnostics, not a setting
+  the user needs to know to obtain the improvement.
 
-`wrapped` es el binding generado con los mismos records tipados del runtime
-actual; no es un wheel antiguo byte a byte. Las mediciones iniciales `before-gaps`
-y `direct-gaps` fueron exploratorias y no sustentan la tabla causal.
+`wrapped` is the generated binding with the current runtime's same typed records;
+it is not a byte-for-byte old wheel. Initial `before-gaps` and `direct-gaps`
+measurements were exploratory and do not support the causal table.
 
-## Qué permite ver el diagnóstico
+## What the diagnostics reveal
 
-`benchmarks/vulkan_dispatch.py` registra fuera de las muestras de rendimiento:
+`benchmarks/vulkan_dispatch.py` records outside performance samples:
 
-- Tiempo host de cada API (incluye binding, driver y posibles esperas).
-- Timestamps GPU alrededor de dispatch y copia; respeta timestampValidBits,
-  período, wraparound, reset de queries y vida útil hasta completar comandos.
-- Conteos de dispatch, barreras, descriptores, envíos, esperas, mapas y asignaciones.
-- Bytes copiados, asignaciones nuevas y caché retenida. **No mide pico total de VRAM.**
+- Host time of each API (includes binding, driver, and possible waits).
+- GPU timestamps around dispatch and copy; respects timestampValidBits, period,
+  wraparound, query reset, and lifetime until commands complete.
+- Counts of dispatches, barriers, descriptors, submissions, waits, mappings,
+  and allocations.
+- Bytes copied, new allocations, and retained cache. **It does not measure total peak VRAM.**
 
-Los timestamps usan TOP/BOTTOM_OF_PIPE y añaden comandos/dependencias. Sus
-intervalos incluyen efectos de instrumentación/etapas; no son tiempos puros de
-shader ni se restan de la pared sin instrumentar para inventar «tiempo Python».
-Ver [timestamps de Vulkan](https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdWriteTimestamp.html).
+Timestamps use TOP/BOTTOM_OF_PIPE and add commands/dependencies. Their intervals
+include instrumentation/stage effects; they are not pure shader times and are
+not subtracted from uninstrumented wall time to invent “Python time.”
+See [Vulkan timestamps](https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdWriteTimestamp.html).
 
-Ejemplo diagnóstico de la primera corrida, ridge float32: los 80 dispatches,
-80 barreras, 20 envíos y dos esperas son idénticos. El total medido dentro de APIs
-pasa de aproximadamente 3,16 a 1,65 ms; los intervalos GPU suman 0,352/0,355 ms.
-Estas magnitudes pertenecen a una invocación instrumentada y no sustituyen sus
-medianas de pared 7,10/5,62 ms. Señalan margen en ejecución/preparación; no establecen
-un límite físico de Vulkan, NVIDIA o PCIe.
+Diagnostic example from the first run, float32 ridge: the 80 dispatches,
+80 barriers, 20 submissions, and two waits are identical. Total time measured
+inside APIs changes from approximately 3.16 to 1.65 ms; GPU intervals sum to
+0.352/0.355 ms. These values belong to an instrumented invocation and do not
+replace its wall-time medians of 7.10/5.62 ms. They indicate room in
+execution/preparation; they do not establish a physical limit for Vulkan,
+NVIDIA, or PCIe.
 
-## Corrección numérica independiente
+## Independent numerical correction
 
-La prueba exploratoria de energía usando `** 2` descubrió NaN para bases negativas.
-No era un error del nuevo dispatch: GLSL define
-[pow fuera de dominio para x<0](https://registry.khronos.org/OpenGL/specs/gl/GLSLangSpec.4.60.html#exponential-functions).
-La fachada prometía comportamiento real NumPy para exponentes enteros representables.
+The exploratory energy test using `** 2` discovered NaN for negative bases.
+This was not an error in the new dispatch: GLSL defines
+[pow as out of domain for x<0](https://registry.khronos.org/OpenGL/specs/gl/GLSLangSpec.4.60.html#exponential-functions).
+The facade promised NumPy real-valued behavior for representable integer exponents.
 
-Se añadió un helper float32 que distingue exponentes enteros/impares, ceros con
-signo, NaN e infinitos y evita llamar pow fuera de su dominio definido. Se prueba
-eager, compile y map-reduce con rebinding de escalares. Power float64 continúa
-fuera de alcance. El control de energía usa el `y*y` del benchmark existente;
-la corrección de potencia no se presenta como ganancia de velocidad del dispatch.
+A float32 helper was added that distinguishes integer/odd exponents, signed
+zeros, NaN, and infinities and avoids calling pow outside its defined domain.
+It is tested in eager, compile, and map-reduce with scalar rebinding. Float64
+power remains out of scope. The energy control uses the existing benchmark's
+`y*y`; the power correction is not presented as a dispatch speed improvement.
 
-Todas las salidas wrapped/direct y las salidas instrumentadas coinciden en los
-casos finales; se conservaron métricas de error float64, iteraciones y conteos.
-Para solvers se valida el residuo verdadero de los inputs representados: la
-tolerancia de parada no garantiza una tolerancia relativa por componente de la
-solución. El error hacia la solución float64 se publica adicionalmente.
+All wrapped/direct outputs and instrumented outputs agree in the final cases;
+float64 error metrics, iterations, and counts were retained. For solvers, the
+true residual of represented inputs is validated: stopping tolerance does not
+guarantee a per-component relative solution tolerance. Error against the
+float64 solution is published additionally.
 
-La suite adversa Vulkan se repitió con tres muestras: 42 configuraciones, diez
-alertas y cero excepciones. Son las mismas diez alertas del subconjunto Vulkan de
-la ronda CUDA inicial. Siguen visibles las limitaciones de cancelación,
-subnormales y sistemas mal condicionados; una mejora del ejecutor no las corrige.
+The adversarial Vulkan suite was repeated with three samples: 42 configurations,
+ten warnings, and zero exceptions. These are the same ten warnings in the Vulkan
+subset of the initial CUDA round. Cancellation, subnormal, and ill-conditioned
+system limitations remain visible; improving the executor does not fix them.
 
-## Comparación aplicada complementaria
+## Complementary application comparison
 
-Se ejecutó la suite existente de covarianza y ridge para matrices 4095×127 y
-4097×129, float32/64: 72 configuraciones y siete muestras, sin errores ni backends
-ausentes. La tabla muestra medianas residentes en ms para 4097×129. OpenPacho usa
-compile; CuPy ejecuta su versión existente de las mismas operaciones. NumPy se
-mide con uno y ocho hilos. Ridge mantiene veinte pasos en todos los proveedores.
+The existing covariance and ridge suite was run for 4095×127 and 4097×129
+matrices, float32/64: 72 configurations and seven samples, without errors or
+missing backends. The table shows resident medians in ms for 4097×129. OpenPacho
+uses compile; CuPy executes its existing version of the same operations. NumPy
+is measured with one and eight threads. Ridge retains twenty steps in all providers.
 
-| Aplicación | dtype | NumPy 1t | NumPy 8t | OpenCL custom | OpenCL CLBlast | Vulkan | CuPy |
+| Application | dtype | NumPy 1t | NumPy 8t | OpenCL custom | OpenCL CLBlast | Vulkan | CuPy |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Covarianza | float32 | 1.690 | 1.099 | 2.081 | 1.538 | 1.179 | 1.131 |
-| Covarianza | float64 | 2.740 | 1.784 | 3.044 | 3.170 | 1.702 | 1.858 |
+| Covariance | float32 | 1.690 | 1.099 | 2.081 | 1.538 | 1.179 | 1.131 |
+| Covariance | float64 | 2.740 | 1.784 | 3.044 | 3.170 | 1.702 | 1.858 |
 | Ridge | float32 | 1.530 | 2.971 | 6.042 | 6.671 | 6.694 | 5.407 |
 | Ridge | float64 | 2.634 | 3.525 | 7.542 | 8.628 | 6.586 | 6.088 |
 
-En esta muestra Vulkan está cerca de CuPy en covarianza y del OpenCL compilado
-en ridge. NumPy de un hilo sigue ganando claramente en ridge de este tamaño.
-La pequeña diferencia Vulkan/CuPy de covarianza no establece una victoria estable:
-es una corrida complementaria, no una repetición pareada entre procesos. Tampoco
-se deben mezclar sus tiempos absolutos con los del control wrapped/direct.
+In this sample, Vulkan is close to CuPy in covariance and compiled OpenCL in
+ridge. Single-threaded NumPy still clearly wins for ridge at this size.
+The small Vulkan/CuPy covariance difference does not establish a stable win:
+it is a complementary run, not a paired repetition across processes. Its
+absolute times must not be mixed with those of the wrapped/direct control either.
 
-El JSON conserva todas las modalidades, p10/p90, preparación, transferencias,
-tiempo completo y error numérico. Las modalidades usan muestras independientes;
-sus medianas no son componentes sumables de una misma invocación. En covarianza
-float32, el error L2 relativo de OpenPacho GPU ronda 7,9e-7 frente a aproximadamente
-9,3e-8 de CuPy: acercar tiempos no implica igualar precisión. Para float64 la
-referencia de esta suite tiene la misma precisión, no certifica exactitud.
+The JSON retains all modes, p10/p90, preparation, transfers, full time, and
+numerical error. Modes use independent samples; their medians are not additive
+components of one invocation. For float32 covariance, OpenPacho GPU's relative
+L2 error is around 7.9e-7 versus approximately 9.3e-8 for CuPy: approaching its
+time does not imply matching precision. For float64, this suite's reference
+has the same precision and does not certify exactness.
 
-## Reproducir
+## Reproduction
 
 ```powershell
-$env:PACHO_VULKAN_COMPILER='<ruta a glslang o glslc>'
+$env:PACHO_VULKAN_COMPILER='<path to glslang or glslc>'
 python -m benchmarks.vulkan_dispatch --repeats 21 --output .artifacts/vulkan-dispatch/run-a.json
 python -m benchmarks.vulkan_dispatch --repeats 21 --seed 4782 --output .artifacts/vulkan-dispatch/run-b.json
 python -m benchmarks.accuracy --backends vulkan --repeats 3 --output .artifacts/vulkan-dispatch/accuracy-new.json
 python -m benchmarks.applications --irregular --backends opencl,opencl-clblast,vulkan,cupy --repeats 7 --output .artifacts/vulkan-dispatch/applications-new.json
 ```
 
-Usar archivos nuevos. No ejecutar otras cargas CPU/GPU durante la medición.
-Warmup, referencias, descarga de validación y diagnóstico quedan fuera del reloj.
-Los solvers son aplicaciones de `examples/`; ridge conserva veinte pasos, no una
-afirmación de convergencia. Los JSON conservan primera llamada y preparación
-aplicada; no son un estudio de arranque frío de proceso.
+Use new files. Do not run other CPU/GPU workloads during measurement.
+Warm-up, references, validation downloads, and diagnostics are outside the timer.
+Solvers are applications in `examples/`; ridge retains twenty steps, not a
+convergence claim. JSON files retain first call and applied preparation;
+this is not a process cold-start study.
 
-Resultados finales: `.artifacts/vulkan-dispatch/final-{1,2}.json`. Las corridas
-`quick*` y `paired-*` conservan exploraciones/fallos del runner. `paired-1` aplicaba
-incorrectamente validación por componente a un solver; el criterio corregido usa
-su residuo contractual sin cambiar el algoritmo, tolerancias ni datos cronometrados.
-Ver [verificación](verification.md) para tests, precisión adversa y empaquetado.
+Final results: `.artifacts/vulkan-dispatch/final-{1,2}.json`. The `quick*` and
+`paired-*` runs retain runner explorations/failures. `paired-1` incorrectly
+applied per-component validation to a solver; the corrected criterion uses its
+contractual residual without changing the algorithm, tolerances, or timed data.
+See [verification](verification.md) for tests, adversarial accuracy, and packaging.
 
-## Siguiente margen de mejora
+## Next room for improvement
 
-1. Reducir preparación/grabación y número de cruces Python→C por grupo de operaciones;
-   el siguiente experimento puede ser un grabador nativo pequeño con el mismo plan.
-2. Medir esperas y staging escalar sin cambiar el control de convergencia de ejemplos.
-3. Mantener kernels/layouts y mejoras de compilador genéricas como líneas paralelas.
-4. No atribuir a hardware los tiempos de driver/cola aún no aislados. Un adaptador
-   completo nuevo, autotuning por familia y nuevas APIs permanecen decisiones posteriores.
+1. Reduce preparation/recording and Python→C crossings per operation group;
+   the next experiment could be a small native recorder with the same plan.
+2. Measure waits and scalar staging without changing example convergence control.
+3. Maintain generic kernel/layout and compiler improvements as parallel tracks.
+4. Do not attribute driver/queue times to hardware before isolating them. A
+   complete new adapter, family-specific autotuning, and new APIs remain later decisions.

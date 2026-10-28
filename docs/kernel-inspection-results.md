@@ -1,206 +1,206 @@
-# Inspección de kernels y revisión de copias — 2026-09-19
+# Kernel inspection and copy review — 2026-09-19
 
-La inspección encontró un problema corregible en el GEMM float32 de OpenCL:
-los literales `0.0` de las cargas condicionales promovían valores a float64.
-Cambiar solamente esos literales a `0.0f` elimina las conversiones y reduce
-aproximadamente **38 %** el tiempo del caso irregular grande medido. Parte de la
-ventaja anterior del padding evitaba esa ineficiencia. No era evidencia suficiente
-para atribuir toda la mejora a eliminar branches.
+Inspection found a fixable issue in OpenCL float32 GEMM:
+`0.0` literals in conditional loads promoted values to float64.
+Changing only those literals to `0.0f` removes the conversions and reduces
+time for the measured large irregular case by approximately **38 %**. Part of the
+previous padding advantage avoided that inefficiency. It was insufficient evidence
+to attribute the entire improvement to removing branches.
 
-La revisión de las copias de padding no detectó corrupción de datos o índices.
-Se reduce preparación repetida y se corrige la selección de ámbito de ejecución
-para un producto con varios envíos. No se afirma que los kernels de copia hayan
-alcanzado un óptimo global ni que padding vaya a mejorar cualquier producto.
+Review of padding copies found no data or index corruption.
+Repeated preparation is reduced and execution-scope selection is corrected
+for a product with multiple submissions. There is no claim that copy kernels have
+reached a global optimum or that padding will improve every product.
 
-## Qué se inspeccionó realmente
+## What was actually inspected
 
-Equipo local: RTX 5060 Ti, Windows, Python 3.12, driver NVIDIA 616.64. El mismo
-GEMM custom usa grupos de 64 hilos, tiles 32×32, bloques K de 16 y 16 acumuladores
-float32 por hilo. Las fuentes comparten esa aritmética, pero los compiladores no
-generan necesariamente el mismo programa.
+Local hardware: RTX 5060 Ti, Windows, Python 3.12, NVIDIA driver 616.64. The same
+custom GEMM uses 64-thread groups, 32×32 tiles, K blocks of 16 and 16 float32
+accumulators per thread. Sources share that arithmetic, but compilers do not
+necessarily generate the same program.
 
-| Backend | Evidencia disponible | Límite de la evidencia |
+| Backend | Available evidence | Evidence limit |
 | --- | --- | --- |
-| OpenCL | Binario de programa devuelto por el driver, que aquí contiene PTX | PTX es IR; sus registros son virtuales, no registros físicos |
-| CUDA | PTX de NVRTC, atributos de la función cargada y SASS obtenido reenlazando ese PTX | El reenlace no es un volcado del módulo ya cargado y puede diferir de su JIT |
-| Vulkan | GLSL y SPIR-V exactos, estadísticas del pipeline con captura habilitada | El driver devuelve cero representaciones internas; no obtuvimos ISA Vulkan |
+| OpenCL | Program binary returned by the driver, which contains PTX here | PTX is IR; its registers are virtual, not physical registers |
+| CUDA | NVRTC PTX, loaded-function attributes and SASS obtained by relinking that PTX | Relinking is not a dump of the already loaded module and may differ from its JIT |
+| Vulkan | Exact GLSL and SPIR-V, pipeline statistics with capture enabled | The driver returns zero internal representations; we did not obtain Vulkan ISA |
 
-También se reenlazó el PTX de OpenCL con el CUDA Driver API, fuera de los relojes.
-Su SASS conserva las conversiones del control anterior y las elimina con el fix.
-Esto refuerza el diagnóstico, pero **no es el ejecutable OpenCL original**.
-La extracción guarda fuentes, flags, hashes, PTX/SPIR-V, metadatos y desensamblado
-en `.artifacts/kernel-inspection`; no añade dependencias al runtime instalable.
+OpenCL PTX was also relinked with the CUDA Driver API, outside the clocks.
+Its SASS retains the previous control's conversions and removes them with the fix.
+This reinforces the diagnosis, but **is not the original OpenCL executable**.
+Extraction saves sources, flags, hashes, PTX/SPIR-V, metadata and disassembly
+in `.artifacts/kernel-inspection`; it adds no dependencies to the installable runtime.
 
-El adaptador Vulkan consulta la extensión
+The Vulkan adapter queries the
 [`VK_KHR_pipeline_executable_properties`](https://docs.vulkan.org/refpages/latest/refpages/source/VK_KHR_pipeline_executable_properties.html)
-mediante ABI tipada, inicializa las estructuras y repite consultas incompletas.
-El dato del driver `Local Memory Size=68719476736` por hilo es sospechoso y no tiene
-corroboración. Una comprobación independiente CFFI/ctypes no encontró error de
-layout o lectura; **no usamos ese valor para inferir spills ni ocupación**.
-Los exports nuevos conservan bytes originales y señalan esta limitación.
+extension through a typed ABI, initializes structures and repeats incomplete queries.
+The driver's `Local Memory Size=68719476736` per-thread value is suspicious and has no
+corroboration. An independent CFFI/ctypes check found no layout or read error;
+**we do not use that value to infer spills or occupancy**.
+New exports retain original bytes and flag this limitation.
 
-## Controles del compilador
+## Compiler controls
 
-Dos rondas, tres procesos separados por ronda, tres tamaños y 21 muestras por
-variante: **72 configuraciones y 1.512 tiempos de pared**, más cinco diagnósticos
-GPU separados por configuración. Entradas y salidas preasignadas; fuera del reloj
-quedan compilación, transferencias y preparación. Cada llamada medida sí incluye
-despacho y sincronización. Son diagnósticos directos del GEMM, no aceleraciones
-de una aplicación ni de la API completa. OpenCL usa una cola con profiling y
-Vulkan pipelines con flags de captura; estos tiempos no sustituyen una medición
-normal del runtime.
+Two rounds, three separate processes per round, three sizes and 21 samples per
+variant: **72 configurations and 1,512 wall times**, plus five separate GPU
+diagnostics per configuration. Inputs and outputs preallocated; compilation,
+transfers and preparation are outside the clock. Each measured call does include
+dispatch and synchronization. These are direct GEMM diagnostics, not application
+or complete API speedups. OpenCL uses a profiling queue and
+Vulkan pipelines use capture flags; these times do not replace a normal runtime
+measurement.
 
-Antes de cada proceso se exige reposo observado y temperatura aceptable. Se
-invierte el orden de backends entre rondas y se alternan las variantes dentro de
-cada caso. La telemetría y todas las muestras se conservan; esto reduce sesgos,
-pero no garantiza clocks constantes ni equilibrio térmico durante cada llamada.
+Observed idle time and acceptable temperature are required before each process.
+Backend order is reversed between rounds and variants alternate within
+each case. Telemetry and all samples are retained; this reduces bias
+but does not guarantee constant clocks or thermal equilibrium during each call.
 
-Todos los casos cumplen `rtol=5e-5, atol=5e-5` frente a NumPy float64. En esta
-suite, incluyendo los modos matemáticos experimentales, el máximo error relativo
-L2 observado es **8,113×10⁻⁷** y el máximo absoluto **4,141×10⁻⁵**. No son cotas
-para matrices arbitrarias ni una promesa de resultados iguales entre backends.
+All cases meet `rtol=5e-5, atol=5e-5` against NumPy float64. In this
+suite, including experimental math modes, maximum observed relative
+L2 error is **8.113×10⁻⁷** and maximum absolute error **4.141×10⁻⁵**. These are not bounds
+for arbitrary matrices or a promise of equal results across backends.
 
-### OpenCL: promoción accidental a doble precisión
+### OpenCL: accidental double-precision promotion
 
-Para `(2049,2047) @ (2047,2051)`:
+For `(2049,2047) @ (2047,2051)`:
 
-| Variante | Medianas de pared de las dos rondas | Conversiones float64 en PTX | Branches en PTX |
+| Variant | Wall-time medians of the two rounds | float64 conversions in PTX | Branches in PTX |
 | --- | ---: | ---: | ---: |
-| Literal histórico `0.0` | 6,322–6,323 ms | 28 | 38 |
-| Literal float32 `0.0f` | 3,907–3,943 ms | 0 | 38 |
-| `0.0f` y grupo fijo declarado al compilador | 3,907–3,918 ms | 0 | 38 |
+| Historical literal `0.0` | 6.322–6.323 ms | 28 | 38 |
+| float32 literal `0.0f` | 3.907–3.943 ms | 0 | 38 |
+| `0.0f` and fixed group declared to the compiler | 3.907–3.918 ms | 0 | 38 |
 
-Los conteos son estáticos, no instrucciones ejecutadas por elemento. Las guardas,
-tiles, entradas, salidas y flags son iguales en la primera pareja. El PTX anterior
-incluía `cvt.f64.f32` y `cvt.rn.f32.f64` alrededor de las cargas; el reenlace SASS
-muestra 14 `F2F.F64.F32` y 14 `F2F.F32.F64`, frente a cero tras corregir el literal.
-La cantidad de branches no disminuye con este cambio.
+Counts are static, not instructions executed per element. Guards,
+tiles, inputs, outputs and flags are identical in the first pair. Previous PTX
+included `cvt.f64.f32` and `cvt.rn.f32.f64` around loads; relinked SASS
+shows 14 `F2F.F64.F32` and 14 `F2F.F32.F64`, versus zero after fixing the literal.
+The number of branches does not decrease with this change.
 
-Los resultados de ambas variantes son numéricamente iguales en las mediciones.
-No se cambia el dtype público, el orden del producto ni los flags matemáticos.
-En tamaños ya alineados, donde OpenCL eliminaba esas cargas condicionales, no
-aparece una ganancia consistente. Declarar el tamaño de grupo tampoco aporta una
-mejora adicional general: no se promueve esa variante.
+Both variants' results are numerically equal in the measurements.
+The public dtype, product order and math flags are unchanged.
+On already aligned sizes, where OpenCL removed those conditional loads,
+no consistent gain appears. Declaring group size also provides no general
+additional improvement: that variant is not promoted.
 
-El fix está en `src/openpacho/_gemm.py`, compartido por los tres backends. En CUDA
-el compilador ya eliminaba las conversiones; en Vulkan los dos literales producen
-exactamente el mismo SPIR-V. No atribuimos ganancias allí al sufijo.
+The fix is in `src/openpacho/_gemm.py`, shared by all three backends. On CUDA
+the compiler already removed the conversions; on Vulkan both literals produce
+exactly the same SPIR-V. We attribute no gains there to the suffix.
 
-### Contracción, guardas y diferencias entre backends
+### Contraction, guards and backend differences
 
-CUDA mantiene `fmad=false`; el PTX/SASS reenlazado del bucle contiene multiplicación
-y suma separadas. La variante experimental `fmad=true` sustituye 32 `FMUL` y 32
-`FADD` estáticos por 32 `FFMA`. El mismo caso irregular pasa de 3,487–3,629 ms con
-literales float32 a 3,324–3,326 ms con contracción. Los resultados **cambian de
-redondeo**. Esta opción queda exclusivamente en el diagnóstico: FMA no equivale
-a activar todo fast-math, y estos ejemplos no establecen garantías universales
-de error. Véanse las [opciones de NVRTC](https://docs.nvidia.com/cuda/nvrtc/).
+CUDA retains `fmad=false`; relinked loop PTX/SASS contains separate multiplication
+and addition. The experimental `fmad=true` variant replaces 32 static `FMUL` and 32
+`FADD` with 32 `FFMA`. The same irregular case goes from 3.487–3.629 ms with
+float32 literals to 3.324–3.326 ms with contraction. Results **change
+rounding**. This option remains exclusively diagnostic: FMA is not equivalent
+to enabling all fast-math, and these examples establish no universal error
+guarantees. See [NVRTC options](https://docs.nvidia.com/cuda/nvrtc/).
 
-OpenCL genera FMA en el control normal. Al prohibir contracción se ve el cambio
-correspondiente en PTX; la diferencia de rendimiento es pequeña en este GEMM.
-En Vulkan, `precise` añade 38 decoraciones `NoContraction`; quitando esas
-decoraciones recuperamos exactamente el SPIR-V del control. La variante sin
-contracción cuesta 3,047–3,240 ms frente a 2,704–2,741 ms del control con literales
-float32, pero sin ISA Vulkan no afirmamos haber contado sus FMA nativas.
+OpenCL generates FMA in the normal control. Disabling contraction shows the corresponding
+change in PTX; the performance difference is small in this GEMM.
+On Vulkan, `precise` adds 38 `NoContraction` decorations; removing those
+decorations recovers exactly the control's SPIR-V. The noncontracting variant
+costs 3.047–3.240 ms versus 2.704–2.741 ms for the control with float32
+literals, but without Vulkan ISA we do not claim to have counted its native FMAs.
 
-Hay un control negativo importante: **baseline y `float_literals` Vulkan tienen
-SPIR-V idéntico en los seis pares**. Aun así, sus medianas irregulares difieren
-aproximadamente 6–7 %. No interpretamos esa diferencia como una optimización del
-shader; evidencia que temporización, ejecución y ubicación de pipelines también
-pueden introducir diferencias que este experimento no separa.
+There is an important negative control: **Vulkan baseline and `float_literals` have
+identical SPIR-V in all six pairs**. Even so, their irregular medians differ
+by approximately 6–7 %. We do not interpret that difference as a shader
+optimization; it shows that timing, execution and pipeline placement can also
+introduce differences this experiment does not separate.
 
-Quitar guardas de tamaños alineados reduce branches intermedias CUDA/Vulkan,
-pero no garantiza una mejora. En Vulkan sube el dato de registros del driver de
-60 a 73. La ganancia pequeña en 1024³ no se reproduce en el tamaño mayor alineado.
-No extrapolamos ocupación efectiva solo de ese contador. Los compiladores pueden
-usar predicación y realizar transformaciones posteriores; un `if` de la fuente
-no corresponde necesariamente a una rama divergente de la ISA.
+Removing guards on aligned sizes reduces intermediate CUDA/Vulkan branches,
+but does not guarantee an improvement. On Vulkan the driver's register value rises from
+60 to 73. The small gain at 1024³ does not reproduce at the larger aligned size.
+We do not extrapolate effective occupancy from that counter alone. Compilers may
+use predication and perform later transformations; a source `if`
+does not necessarily correspond to a divergent ISA branch.
 
-Por tanto, la promoción float64 explica una parte grande y demostrable del gap
-OpenCL. La política de contracción explica otra diferencia de aritmética y parte
-del tiempo. Quedan sin aislar suficientemente planificación de instrucciones,
-desenrollado, acceso a memoria y código nativo final de Vulkan. No hay evidencia
-de que la diferencia restante sea un muro físico de OpenCL, CUDA o Vulkan.
+Thus float64 promotion explains a large and demonstrable part of the OpenCL gap.
+Contraction policy explains another arithmetic difference and part
+of the time. Instruction scheduling, unrolling, memory access and final
+Vulkan native code remain insufficiently isolated. There is no evidence
+that the remaining difference is a physical wall for OpenCL, CUDA or Vulkan.
 
-## Revisión de la implementación de copias
+## Copy implementation review
 
-Los kernels siguen copiando palabras uint32 sobre almacenamiento float32. Esto
-preserva subnormales, ceros con signo y payloads de NaN, y escribe `0x00000000` en
-el relleno. Se verifican dimensiones, límites, almacenamiento y metadatos en
-cada llamada. Las formas de lote y el recorte se mantienen dentro de los buffers.
+Kernels still copy uint32 words over float32 storage. This
+preserves subnormals, signed zeros and NaN payloads, and writes `0x00000000` into
+padding. Dimensions, limits, storage and metadata are checked on
+every call. Batch shapes and cropping remain within buffers.
 
-Cambios seleccionados:
+Selected changes:
 
-1. Caché LRU de 128 entradas para geometría validada y para el cuerpo de copia.
-   Solo retiene tuplas de enteros y cadenas; ni arrays, ni buffers, ni objetos
-   retenidos indirectamente por `dtype.metadata`. Los valores y metadatos actuales
-   se comprueban incluso cuando la geometría ya está en caché.
-2. El compilador cuenta los envíos físicos conocidos del GEMM con padding:
-   hasta dos copias, GEMM y recorte. Así CUDA puede amortizar el contexto de ese
-   paso, sin alterar kernels, tolerancias, datos ni API. Un producto alineado
-   conserva el criterio de un solo envío. La ruta eager no cambia su ámbito.
+1. A 128-entry LRU cache for validated geometry and the copy body.
+   It retains only integer tuples and strings; no arrays, buffers or objects
+   retained indirectly by `dtype.metadata`. Current values and metadata
+   are checked even when geometry is already cached.
+2. The compiler counts known physical submissions for padded GEMM:
+   up to two copies, GEMM and cropping. CUDA can thus amortize the context for that
+   step without changing kernels, tolerances, data or API. An aligned product
+   retains the single-submission criterion. The eager path does not change its scope.
 
-El microbenchmark de preparación host, nueve rondas de 100.000 llamadas, da:
-`_body` 1,246 → 0,077 µs; `_validate` 2,321 → 2,246 µs. El segundo ahorro es
-marginal. No se presentan estos tiempos como coste GPU ni como ganancia completa.
+The host-preparation microbenchmark, nine rounds of 100,000 calls, gives:
+`_body` 1.246 → 0.077 µs; `_validate` 2.321 → 2.246 µs. The second saving is
+marginal. These times are not presented as GPU cost or complete-flow gain.
 
-El benchmark público usa el wheel anterior **solo para cargar `_padding_copy.py`**;
-todos los modos ejecutan el GEMM corregido y los backends actuales. `old_copy` y
-`cached_copy` aíslan la preparación; `cached_copy` y `current` aíslan el ámbito
-CUDA. En OpenCL/Vulkan estos últimos son controles equivalentes, útiles para
-observar ruido. `unpadded` es una referencia distinta, no una ablación de caché.
-Son **144 configuraciones y 4.464 muestras**, con seis formas, dos rondas y 31
-muestras por modo. Incluyen asignaciones, relleno, GEMM, recorte y sincronización,
-con entradas residentes. Las cuatro salidas de cada uno de los 36 grupos son
-idénticas bit a bit; todas cumplen tolerancias contra una referencia float64.
-El máximo error relativo L2 de esta segunda suite es **8,106×10⁻⁷**, y el absoluto
-**4,093×10⁻⁵**. Las pruebas de valores especiales se ejecutan aparte del benchmark
-de datos aleatorios finitos.
+The public benchmark uses the previous wheel **only to load `_padding_copy.py`**;
+all modes execute the corrected GEMM and current backends. `old_copy` and
+`cached_copy` isolate preparation; `cached_copy` and `current` isolate CUDA
+scope. On OpenCL/Vulkan the latter are equivalent controls, useful for
+observing noise. `unpadded` is a different reference, not a cache ablation.
+There are **144 configurations and 4,464 samples**, with six shapes, two rounds and 31
+samples per mode. They include allocations, padding, GEMM, cropping and synchronization,
+with resident inputs. All four outputs of each of the 36 groups are
+bitwise identical; all meet tolerances against a float64 reference.
+The maximum relative L2 error in this second suite is **8.106×10⁻⁷**, and absolute error
+**4.093×10⁻⁵**. Special-value tests run separately from the finite-random-data
+benchmark.
 
-Resultados representativos, medianas de cada ronda:
+Representative results, medians of each round:
 
-| Caso | Antes → actual, ronda 1 | Antes → actual, ronda 2 | Lectura |
+| Case | Before → current, round 1 | Before → current, round 2 | Interpretation |
 | --- | ---: | ---: | --- |
-| Vulkan 33×17×65 | 222,1 → 214,1 µs | 222,7 → 211,7 µs | Ahorro pequeño de preparación |
-| Vulkan 1025×1023×1027 | 641,1 → 623,8 µs | 631,9 → 619,6 µs | Ahorro pequeño, repetido |
-| CUDA 33×17×65 | 214,0 → 200,1 µs | 414,6 → 410,6 µs | Menos coste, gran variación entre rondas |
-| CUDA 2049×2047×2051 | 3770,3 → 3751,7 µs | 3672,7 → 3695,3 µs | Mixto; no mejora demostrada |
+| Vulkan 33×17×65 | 222.1 → 214.1 µs | 222.7 → 211.7 µs | Small preparation saving |
+| Vulkan 1025×1023×1027 | 641.1 → 623.8 µs | 631.9 → 619.6 µs | Small, repeated saving |
+| CUDA 33×17×65 | 214.0 → 200.1 µs | 414.6 → 410.6 µs | Lower cost, large variation between rounds |
+| CUDA 2049×2047×2051 | 3770.3 → 3751.7 µs | 3672.7 → 3695.3 µs | Mixed; no demonstrated improvement |
 
-El diagnóstico CUDA reduce 12 pares push/pop a 5, conservando cuatro lanzamientos
-en ese alcance instrumentado. No afirma que el kernel se acelere. Los resultados
-OpenCL de las cachés son pequeños o mixtos. No procede seguir priorizando ese
-microajuste sobre GEMM, envíos, temporales o layouts con mayor coste eliminable.
+The CUDA diagnostic reduces 12 push/pop pairs to 5, retaining four launches
+in that instrumented scope. It does not claim the kernel becomes faster. OpenCL
+cache results are small or mixed. Further prioritizing that microadjustment
+over GEMM, submissions, temporaries or layouts with greater removable cost is unwarranted.
 
-Después de corregir los literales, OpenCL irregular grande **sin padding** cuesta
-3,925–3,940 ms en el ejecutor preparado, frente a **4,110–4,112 ms con padding**.
-Esta comparación incluye las copias. La ventaja anterior del padding no persiste
-en ese caso con la ruta base corregida. La opción se conserva desactivada por
-defecto; CUDA sigue siendo mixto y Vulkan varía entre rondas. Los resultados
-históricos de [padding](padding-results.md) permanecen como snapshot anterior.
+After fixing literals, large irregular OpenCL **without padding** costs
+3.925–3.940 ms in the prepared executor, versus **4.110–4.112 ms with padding**.
+This comparison includes copies. The previous padding advantage does not persist
+in that case with the corrected baseline path. The option remains disabled by
+default; CUDA remains mixed and Vulkan varies between rounds. Historical
+[padding results](padding-results.md) remain as the previous snapshot.
 
-No se introduce vectorización `uint4` indiscriminada: el ancho impar cambia la
-alineación de cada fila. Tampoco se elimina una guarda necesaria de copia. Un
-siguiente experimento con más margen sería escribir la salida lógica desde GEMM
-para evitar el buffer intermedio y el recorte, contrastando el efecto de stores
-con stride irregular. Necesita su propio control y no está implementado aquí.
+Indiscriminate `uint4` vectorization is not introduced: odd widths change each
+row's alignment. No necessary copy guard is removed either. A next experiment
+with more room would write the logical output from GEMM to avoid the intermediate
+buffer and cropping, checking the effect of stores with irregular stride.
+It needs its own control and is not implemented here.
 
-## Reproducir y continuar
+## Reproduce and continue
 
 ```sh
 python -m benchmarks.isolated --worker kernel_inspection --backends opencl,vulkan,cuda-custom --rounds 2 --repeats 21 --max-wait-seconds 300 --max-temperature 52 --output .artifacts/inspection-new
-python -m benchmarks.isolated --worker padding_copy_review --control-wheel <wheel-anterior.whl> --backends opencl,vulkan,cuda-custom --rounds 2 --repeats 31 --max-wait-seconds 300 --max-temperature 52 --output .artifacts/copy-review-new
+python -m benchmarks.isolated --worker padding_copy_review --control-wheel <previous-wheel.whl> --backends opencl,vulkan,cuda-custom --rounds 2 --repeats 31 --max-wait-seconds 300 --max-temperature 52 --output .artifacts/copy-review-new
 ```
 
-Requieren las dependencias del backend y el compilador Vulkan configurado.
-`PACHO_NVDISASM` es opcional para reenlazar/desensamblar PTX CUDA, sin cambiar el
-runtime. La captura Vulkan exige la extensión de introspección; su ausencia
-produce un error explícito. Los controles históricos y nuevas capturas conservan
-sus hashes propios. Los reportes iniciales denominan `exact_baseline_equality` a
-igualdad numérica; el worker actual distingue igualdad numérica y bit a bit.
+They require backend dependencies and a configured Vulkan compiler.
+`PACHO_NVDISASM` is optional for relinking/disassembling CUDA PTX without changing the
+runtime. Vulkan capture requires the introspection extension; its absence
+produces an explicit error. Historical controls and new captures retain
+their own hashes. Initial reports call numerical equality `exact_baseline_equality`;
+the current worker distinguishes numerical and bitwise equality.
 
-Pendientes: medir políticas matemáticas explícitas, variantes de acceso/desenrollado
-con control de precisión, obtener evidencia de ISA Vulkan por herramientas del
-fabricante cuando estén disponibles y validar otros dispositivos. `mean` con
-suma rellenada y divisor lógico queda anotado como extensión futura en
-[padding](padding.md#extensión-futura-reducciones), sin implementación en esta ronda.
-Las pruebas y distribuciones verificadas se registran en [verificación](verification.md).
+Pending: measure explicit math policies, access/unrolling variants
+with accuracy controls, obtain Vulkan ISA evidence through vendor tools
+when available, and validate other devices. `mean` with
+a padded sum and logical divisor is noted as a future extension in
+[padding](padding.md#future-extension-reductions), without implementation in this round.
+Verified tests and distributions are recorded in [verification](verification.md).

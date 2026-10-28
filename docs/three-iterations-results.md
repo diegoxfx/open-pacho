@@ -1,229 +1,225 @@
-# Tres iteraciones: GEMM rectangular, vectores CUDA y layouts compilados
+# Three iterations: rectangular GEMM, CUDA vectors, and compiled layouts
 
-Fecha: 2026-09-24. Hardware de validación: NVIDIA RTX 5060 Ti, Windows,
-driver 616.64. Esta evidencia no certifica otros fabricantes ni representa un
-límite físico del hardware.
+Date: 2026-09-24. Validation hardware: NVIDIA RTX 5060 Ti, Windows,
+driver 616.64. This evidence does not certify other vendors or represent a
+physical hardware limit.
 
-## Cambios y selección
+## Changes and selection
 
-1. **GEMM custom con pocas filas.** `_gemm_rect.py` conserva la acumulación
-   secuencial en K y usa 64 hilos por grupo. OpenCL calcula tiles 16×32 con K=16;
-   CUDA calcula 16×16 con K=32. La ruta habitual calcula 32×32. Reducir el tile
-   puede repartir mejor estas matrices, pero empeora otros tamaños: no se aplica
-   universalmente ni se comparte una configuración a ciegas entre backends.
-2. **Productos vectoriales cuBLAS.** DOT escribe el resultado directamente en
-   dispositivo. GEMV admite matrices por lotes con un vector compartido, flags de
-   transposición y offsets contiguos. La política final se decide con llamadas
-   públicas sincronizadas, no por el nombre de la primitiva nativa.
-3. **Transpuestas privadas compiladas.** El compilador consulta un hook opcional
-   del backend y CLBlast recibe flags y leading dimensions. Una transpuesta 2D
-   completa de único consumidor puede omitirse si no es una salida pública.
-   Eager, transpuestas compartidas, otros proveedores y layouts no admitidos
-   conservan sus copias. No cambia la sintaxis NumPy del programa del usuario.
+1. **Custom GEMM with few rows.** `_gemm_rect.py` preserves sequential
+   accumulation in K and uses 64 threads per group. OpenCL computes 16×32 tiles
+   with K=16; CUDA computes 16×16 with K=32. The usual path computes 32×32.
+   Reducing the tile can distribute these matrices better, but worsens other
+   sizes: it is neither applied universally nor blindly shared across backends.
+2. **cuBLAS vector products.** DOT writes the result directly on device.
+   GEMV supports batched matrices with a shared vector, transpose flags, and
+   contiguous offsets. Final policy is decided through synchronized public calls,
+   not by the native primitive's name.
+3. **Compiled private transposes.** The compiler queries an optional backend
+   hook, and CLBlast receives flags and leading dimensions. A complete 2D
+   single-consumer transpose can be omitted if it is not a public output.
+   Eager execution, shared transposes, other providers, and unsupported layouts
+   retain copies. Users' NumPy program syntax does not change.
 
-La selección rectangular exige float32, capacidades de register-GEMM existentes,
-dos matrices 2D, `32 <= M < 96`, `256 <= N <= 4096` y una cuadrícula anterior de
-como máximo 224 tiles. OpenCL requiere K≥4081 y CUDA K≥2048. Los casos totalmente
-alineados (M/N múltiplos de 32 y K de 16), lotes y regiones mayores conservan su
-ruta. Padding explícito mantiene su plan separado. Son fronteras conservadoras
-de esta medición, no un autotuner ni garantías universales de superioridad.
+Rectangular selection requires float32, existing register-GEMM capabilities,
+two 2D matrices, `32 <= M < 96`, `256 <= N <= 4096`, and a previous grid of at
+most 224 tiles. OpenCL requires K≥4081 and CUDA K≥2048. Fully aligned cases
+(M/N multiples of 32 and K of 16), batches, and larger regions retain their path.
+Explicit padding keeps its separate plan. These are conservative boundaries
+from this measurement, not an autotuner or universal guarantees of superiority.
 
-Los kernels solo usan instrucciones portables existentes. Las dos variantes
-mantienen memoria compartida dentro de los 4 KiB ya requeridos, guardas para
-bordes irregulares y la política matemática anterior. El usuario no necesita
-ajustar tiles, crear buffers privados ni cambiar sus algoritmos.
+Kernels use only existing portable instructions. Both variants keep shared
+memory within the already-required 4 KiB, guards for irregular boundaries, and
+the previous mathematical policy. Users do not need to tune tiles, create private
+buffers, or change algorithms.
 
-## Protocolo
+## Protocol
 
-Procesos GPU secuenciales, dirigidos por el agente principal. Los subagentes no
-ejecutaron pruebas GPU. Antes de cada proceso: al menos 10 s de reposo, tres
-lecturas consecutivas con utilización GPU/memoria ≤5%, temperatura ≤52 °C y
-como máximo 2 °C sobre la referencia de reposo. Un timeout detiene el ensayo;
-no autoriza saltarse la condición. Compilación, calentamiento, referencias
-NumPy y validación quedan fuera del reloj.
+Sequential GPU processes directed by the main agent. Subagents did not run GPU
+tests. Before each process: at least 10 s idle, three consecutive readings with
+GPU/memory utilization ≤5%, temperature ≤52 °C, and at most 2 °C above the idle
+reference. A timeout stops the experiment; it does not authorize bypassing the
+condition. Compilation, warm-up, NumPy references, and validation are outside
+the timer.
 
-Cada caso tiene dos controles anteriores independientes y una variante. Se
-intercalan las seis permutaciones de orden por igual, 30 muestras por modo y
-scope, en dos rondas con semillas distintas y orden de backends invertido.
-`prepared`/`resident` incluye API preparada, asignación de salida y sincronización;
-`complete` incluye además subir todos los inputs y descargar el resultado.
-La selección del control ocurre fuera del reloj. La aceleración divide la media
-geométrica de las medianas de ambos controles por la mediana de la variante.
+Each case has two independent previous controls and one variant. All six order
+permutations are interleaved equally, 30 samples per mode and scope, in two
+rounds with different seeds and reversed backend order. `prepared`/`resident`
+includes the prepared API, output allocation, and synchronization; `complete`
+also includes uploading all inputs and downloading the result. Control selection
+occurs outside the timer. Speedup divides the geometric mean of both controls'
+medians by the variant median.
 
-Los controles rectangulares desactivan solo la nueva configuración de tile.
-Los de layouts desactivan el hook únicamente al preparar planes independientes.
-Los de cuBLAS extraen únicamente `CUDABackend.matmul` del wheel histórico local
-`0.1.0a1`, SHA256
+Rectangular controls disable only the new tile configuration. Layout controls
+disable the hook only when preparing independent plans. cuBLAS controls extract
+only `CUDABackend.matmul` from the local historical `0.1.0a1` wheel, SHA256
 `a577d80ffde9c8be17ab1c2ca9c51278aaf34412e6be84bd0ecd24450fa66e3b`;
-el resto del runtime es actual. El literal OpenCL `0.0f` ya estaba corregido en
-ese baseline: ninguna ganancia aquí compara contra aquel bug de promoción.
+the rest of the runtime is current. The OpenCL `0.0f` literal was already fixed
+in that baseline: no gain here compares against that promotion bug.
 
-Los reportes contienen muestras, hashes de fuentes, telemetría, planes, rutas,
-errores y fallos de tolerancia. Una ejecución completa no equivale a aprobación
-numérica. Los artefactos locales están en `.artifacts/next-three/candidates`
-y `.artifacts/next-three/confirmation`, conservando también pilotos y candidatos
-descartados. El formateo final no modifica el generador rectangular; su AST se
-comprobó idéntico y la unión equivalente de condiciones del selector se contrastó
-en 4.374 combinaciones (`format-equivalence.json`).
+Reports contain samples, source hashes, telemetry, plans, paths, errors, and
+tolerance failures. A complete run does not imply numerical approval. Local
+artifacts are in `.artifacts/next-three/candidates` and
+`.artifacts/next-three/confirmation`, also retaining pilots and discarded
+candidates. Final formatting does not modify the rectangular generator; its AST
+was checked as identical, and the selector's equivalent condition union was
+cross-checked over 4,374 combinations (`format-equivalence.json`).
 
-En total: **38.880 muestras públicas**, incluyendo el candidato vectorial luego
-acotado, más **2.352 muestras de confirmación Vulkan** con salida preasignada.
-Doce procesos de confirmación/medición terminaron correctamente. Todas sus
-puertas de reposo registraron `observed-idle`, con esperas de 10,5 a 229,2 s.
-Los pilotos exploratorios se conservan aparte y no se suman a esas cifras.
+Total: **38,880 public samples**, including the vector candidate later narrowed,
+plus **2,352 Vulkan confirmation samples** with preallocated output. Twelve
+confirmation/measurement processes completed successfully. All their idle gates
+recorded `observed-idle`, with waits of 10.5 to 229.2 s. Exploratory pilots remain
+separate and are not added to those counts.
 
-## GEMM rectangular: dos rondas públicas
+## Rectangular GEMM: two public rounds
 
-21 formas por backend y ronda, incluidas regiones que deben conservar el kernel
-anterior. Ningún caso seleccionado empeoró el tiempo residente en estas dos
-rondas: las ganancias fueron 1,14–1,79× en OpenCL y 1,09–3,09× en CUDA custom.
-Estos intervalos describen exclusivamente las formas seleccionadas medidas.
+21 shapes per backend and round, including regions that must retain the previous
+kernel. No selected case worsened resident time in these two rounds: gains were
+1.14–1.79× on OpenCL and 1.09–3.09× on custom CUDA. These ranges describe only
+the measured selected shapes.
 
-| Producto float32 | Backend | Residente, control → nuevo (ms, ronda 1) | Aceleración residente, rondas 1 / 2 | Completo, rondas 1 / 2 |
+| Float32 product | Backend | Resident, control → new (ms, round 1) | Resident speedup, rounds 1 / 2 | Full, rounds 1 / 2 |
 | --- | --- | ---: | ---: | ---: |
-| 65×8191 @ 8191×2051 | OpenCL custom | 1,650 → 1,024 | 1,61× / 1,60× | 1,055× / 1,054× |
-| 64×8191 @ 8191×2051 | OpenCL custom | 1,652 → 0,923 | 1,79× / 1,79× | 1,066× / 1,063× |
-| 65×8191 @ 8191×257 | OpenCL custom | 0,945 → 0,549 | 1,72× / 1,70× | 1,173× / 1,170× |
-| 65×8191 @ 8191×2051 | CUDA custom | 1,766 → 1,020 | 1,73× / 1,71× | 1,066× / 1,068× |
-| 65×8191 @ 8191×257 | CUDA custom | 1,143 → 0,370 | 3,09× / 3,04× | 1,367× / 1,351× |
+| 65×8191 @ 8191×2051 | OpenCL custom | 1.650 → 1.024 | 1.61× / 1.60× | 1.055× / 1.054× |
+| 64×8191 @ 8191×2051 | OpenCL custom | 1.652 → 0.923 | 1.79× / 1.79× | 1.066× / 1.063× |
+| 65×8191 @ 8191×257 | OpenCL custom | 0.945 → 0.549 | 1.72× / 1.70× | 1.173× / 1.170× |
+| 65×8191 @ 8191×2051 | CUDA custom | 1.766 → 1.020 | 1.73× / 1.71× | 1.066× / 1.068× |
+| 65×8191 @ 8191×257 | CUDA custom | 1.143 → 0.370 | 3.09× / 3.04× | 1.367× / 1.351× |
 
-En los grupos seleccionados, los dos controles anteriores difirieron como máximo
-1,55% en sus medianas residentes y 1,02% en las completas. Los controles cuadrados,
-lotes y regiones excluidas conservan el código anterior. El ahorro procede de
-otra distribución del trabajo; no de eliminar transferencias incluidas en el
-control ni de omitir comprobaciones del programa.
+In selected groups, the two previous controls differed by at most 1.55% in
+resident medians and 1.02% in full medians. Square controls, batches, and excluded
+regions retain previous code. Savings come from a different work distribution,
+not from eliminating transfers included in the control or omitting program checks.
 
-### Precisión que esta optimización no resuelve
+### Precision this optimization does not resolve
 
-Los 84 grupos forma/backend/semilla rectangulares conservaron los bits del control.
-No se amplió ninguna tolerancia: rtol=atol=5e-5 contra referencia float64 desde los
-mismos inputs float32. Persisten siete grupos con elementos fuera del umbral,
-idénticos en ambos controles y la variante:
+All 84 rectangular shape/backend/seed groups preserved control bits. No tolerance
+was widened: rtol=atol=5e-5 against a float64 reference from the same float32 inputs.
+Seven groups with elements outside the threshold persist, identical in both
+controls and the variant:
 
-- K=16383: OpenCL tuvo 7/15 elementos y CUDA 6/14, según la ronda.
-- `64×8191 @ 8191×4096`, ronda 2: un elemento en cada backend; esta forma ni
-  siquiera activa el tile nuevo.
-- `65×8191 @ 8191×257`, CUDA, ronda 2: un elemento.
+- K=16383: OpenCL had 7/15 elements and CUDA 6/14, depending on round.
+- `64×8191 @ 8191×4096`, round 2: one element on each backend; this shape does
+  not even activate the new tile.
+- `65×8191 @ 8191×257`, CUDA, round 2: one element.
 
-Por ello una mejora de tiempo no convierte todos estos casos en aprobados
-numéricamente. La acumulación float32 larga y la cancelación siguen pendientes
-de una política de precisión explícita. El caso CUDA de 3× incluye esa alerta.
+A timing improvement therefore does not make all these cases numerically
+approved. Long float32 accumulation and cancellation still await an explicit
+precision policy. The 3× CUDA case includes that warning.
 
-## CLBlast: omitir transpuestas privadas
+## CLBlast: omitting private transposes
 
-28 grupos en dos rondas: doce productos con flags izquierdo/derecho/ambos y dos
-covarianzas centradas. Todos pasan la referencia float64 con rtol=atol=5e-5.
+28 groups in two rounds: twelve products with left/right/both flags and two
+centered covariances. All pass the float64 reference with rtol=atol=5e-5.
 
-| Operación float32 | Residente, control → nuevo (ms, ronda 1) | Aceleración residente, rondas 1 / 2 | Completo, rondas 1 / 2 |
+| Float32 operation | Resident, control → new (ms, round 1) | Resident speedup, rounds 1 / 2 | Full, rounds 1 / 2 |
 | --- | ---: | ---: | ---: |
-| A.T @ B.T, producto lógico 257×513×129 | 0,161 → 0,100 | 1,61× / 1,59× | 1,157× / 1,154× |
-| A @ B.T, producto lógico 65×8191×2051 | 1,563 → 0,950 | 1,65× / 1,65× | 1,054× / 1,052× |
-| A.T @ B.T, producto lógico 65×8191×2051 | 1,613 → 0,971 | 1,66× / 1,69× | 1,056× / 1,058× |
-| Covarianza centrada de 4097×129 | 0,374 → 0,346 | 1,08× / 1,06× | 1,036× / 1,049× |
-| Covarianza centrada de 8191×513 | 2,478 → 2,425 | 1,02× / 1,03× | 1,012× / 1,009× |
+| A.T @ B.T, logical product 257×513×129 | 0.161 → 0.100 | 1.61× / 1.59× | 1.157× / 1.154× |
+| A @ B.T, logical product 65×8191×2051 | 1.563 → 0.950 | 1.65× / 1.65× | 1.054× / 1.052× |
+| A.T @ B.T, logical product 65×8191×2051 | 1.613 → 0.971 | 1.66× / 1.69× | 1.056× / 1.058× |
+| Centered covariance of 4097×129 | 0.374 → 0.346 | 1.08× / 1.06× | 1.036× / 1.049× |
+| Centered covariance of 8191×513 | 2.478 → 2.425 | 1.02× / 1.03× | 1.012× / 1.009× |
 
-La covarianza pequeña tuvo 11,45% de diferencia entre controles residentes en
-la primera ronda: su 1,08× no es una estimación precisa de ganancia. La segunda
-tuvo controles mucho más próximos. En covarianza grande el beneficio es marginal;
-no justifica seguir priorizando microajustes de ese patrón. Eliminar copias no
-garantiza ganar si otro layout conduce a un kernel BLAS menos eficiente.
+Small covariance had an 11.45% difference between resident controls in the first
+round: its 1.08× is not a precise gain estimate. The second had much closer
+controls. For large covariance the benefit is marginal; it does not justify
+continuing to prioritize microadjustments to that pattern. Removing copies does
+not guarantee a win if another layout leads to a less efficient BLAS kernel.
 
-Los 28 grupos también coincidieron bit a bit con sus controles materializados,
-pero eso es una observación de esta suite, no una garantía de la API. El error
-absoluto máximo fue 1,36e-4 y el relativo L2 máximo 1,63e-6; la tolerancia combina
-parte absoluta y relativa por elemento. No se asume que error absoluto máximo
-deba ser menor que el término absoluto de una tolerancia mixta.
+All 28 groups also matched their materialized controls bitwise, but that is a
+suite observation, not an API guarantee. Maximum absolute error was 1.36e-4 and
+maximum relative L2 error 1.63e-6; tolerance combines absolute and relative parts
+per element. Maximum absolute error is not assumed to have to fall below the
+absolute term of a mixed tolerance.
 
-## cuBLAS: seleccionar después de medir
+## cuBLAS: selecting after measurement
 
-El primer candidato usaba GEMV para todos los productos con un vector. En dos
-rondas perdió aproximadamente 4–15% de throughput residente en buena parte de
-los casos sin batch. La versión integrada mantiene GEMM para esos productos y
-usa DOT para dos vectores y GEMV para matrices con batch explícito. El cambio
-de pointer mode queda bajo lock, con recuperación explícita si restaurar HOST
-falla; los buffers ya enviados permanecen retenidos.
+The first candidate used GEMV for every product with a vector. In two rounds it
+lost approximately 4–15% of resident throughput in many unbatched cases. The
+integrated version keeps GEMM for those products and uses DOT for two vectors
+and GEMV for matrices with explicit batches. Pointer-mode changes stay under a
+lock, with explicit recovery if restoring HOST fails; submitted buffers remain
+retained.
 
-Las dos rondas finales añaden lotes singleton en ambas orientaciones. Se
-mantienen los casos anteriores, los dos dtypes y un GEMM de control. La mejora
-batched incluye eliminar cálculo general de índices en Python: el experimento
-no separa ese ahorro del kernel GEMV nativo.
+The two final rounds add singleton batches in both orientations. Previous cases,
+both dtypes, and a GEMM control are retained. Batched improvement includes removing
+general Python index computation: the experiment does not separate that saving
+from the native GEMV kernel.
 
-| Operación | Aceleración residente, rondas finales 1 / 2 | Completo, rondas 1 / 2 |
+| Operation | Resident speedup, final rounds 1 / 2 | Full, rounds 1 / 2 |
 | --- | ---: | ---: |
-| DOT 257, float32 | 1,12× / 1,11× | 1,126× / 1,025× |
-| DOT 8191, float64 | 1,12× / 1,10× | 0,993× / 1,047× |
-| DOT 1048573, float32 | 1,10× / 1,11× | 1,016× / 1,003× |
-| (4,257,511) @ (511,), float32 | 1,13× / 1,08× | 1,012× / 1,006× |
-| (511,) @ (4,511,257), float64 | 1,14× / 1,10× | 1,017× / 1,021× |
+| DOT 257, float32 | 1.12× / 1.11× | 1.126× / 1.025× |
+| DOT 8191, float64 | 1.12× / 1.10× | 0.993× / 1.047× |
+| DOT 1048573, float32 | 1.10× / 1.11× | 1.016× / 1.003× |
+| (4,257,511) @ (511,), float32 | 1.13× / 1.08× | 1.012× / 1.006× |
+| (511,) @ (4,511,257), float64 | 1.14× / 1.10× | 1.017× / 1.021× |
 
-DOT largo float64 fue mixto (0,998× / 1,117× residente); no se declara una mejora
-universal del 10%. Los singleton batches variaron aproximadamente entre 1,00× y
-1,03× residente y el recorrido completo fue mixto. La ruta sin batch recupera
-el comportamiento anterior, con diferencias residuales de hasta ~2,3% a la baja
-en esta suite, del orden de 0,4–1,9 µs. La nueva selección/recuperación también
-añade trabajo host: no se presenta ese coste como eliminado.
+Long float64 DOT was mixed (0.998× / 1.117× resident); no universal 10% improvement
+is claimed. Singleton batches varied approximately 1.00× to 1.03× resident and
+the full flow was mixed. The unbatched path restores previous behavior, with
+residual downward differences of up to ~2.3% in this suite, around 0.4–1.9 µs.
+New selection/recovery also adds host work: that cost is not presented as eliminated.
 
-El control negativo GEMM tuvo una ganancia completa aparente de 6,8% en una ronda,
-sin cambiar su kernel; otro control A/A difirió 9,8% en residente. Esto limita la
-interpretación de porcentajes pequeños. Las ganancias completas CUDA son modestas
-y ruidosas frente al ahorro residente. Las muestras y controles se conservan.
+The negative GEMM control had an apparent full gain of 6.8% in one round without
+changing its kernel; another A/A control differed 9.8% resident. This limits the
+interpretation of small percentages. Full CUDA gains are modest and noisy
+relative to resident savings. Samples and controls are retained.
 
-Los 56 grupos finales pasan las tolerancias vectoriales existentes
-(rtol=5e-5/atol=5e-6 en float32; 1e-11/1e-12 en float64). La referencia float64
-es más precisa solo para float32. Cambiar la primitiva puede cambiar el árbol de
-suma; no se exige igualdad de bits con GEMM. La etiqueta `native` del reporte
-significa la política final, que conserva GEMM donde corresponde.
+All 56 final groups pass existing vector tolerances (rtol=5e-5/atol=5e-6 for
+float32; 1e-11/1e-12 for float64). The float64 reference is higher precision only
+for float32. Changing primitives can change the summation tree; bitwise equality
+with GEMM is not required. The report's `native` label means the final policy,
+which retains GEMM where appropriate.
 
-## Vulkan: confirmación aislada de una dirección descartada
+## Vulkan: isolated confirmation of a rejected direction
 
-El piloto ya ejecutó OpenCL, CUDA y Vulkan secuencialmente, sin benchmarks de
-subagentes. Se repitió Vulkan en dos procesos aislados adicionales: seis formas,
-cinco tiles candidatos y dos controles del kernel actual, 28 muestras por modo.
-Órdenes cíclicos y sus reversos equilibran la posición de los siete modos.
-Reposo observado antes de cada proceso; ningún otro proceso de benchmark o test
-GPU del proyecto corrió a la vez. Esto controla nuestro trabajo, no garantiza
-la ausencia absoluta de actividad del escritorio/driver.
+The pilot already ran OpenCL, CUDA, and Vulkan sequentially, without subagent
+benchmarks. Vulkan was repeated in two additional isolated processes: six shapes,
+five candidate tiles, and two controls of the current kernel, 28 samples per
+mode. Cyclic orders and their reverses balance positions of all seven modes.
+Observed idle conditions before each process; no other project GPU benchmark or
+test process ran simultaneously. This controls our work, not an absolute absence
+of desktop/driver activity.
 
-| Producto | Control A / control B, ronda 1 (ms) | Mejor candidato nuevo, ronda 1 / 2 (ms) | Control A / B, ronda 2 (ms) |
+| Product | Control A / control B, round 1 (ms) | Best new candidate, round 1 / 2 (ms) | Control A / B, round 2 (ms) |
 | --- | ---: | ---: | ---: |
-| 65×8191 @ 8191×2051 | 0,758 / 0,759 | 0,969 / 0,938 | 0,735 / 0,733 |
-| 64×8191 @ 8191×2051 | 0,696 / 0,696 | 0,866 / 0,868 | 0,691 / 0,693 |
-| 65×4095 @ 4095×2051 | 0,432 / 0,437 | 0,535 / 0,531 | 0,425 / 0,426 |
-| 1024×1024 @ 1024×1024 | 0,438 / 0,432 | 0,530 / 0,549 | 0,455 / 0,451 |
+| 65×8191 @ 8191×2051 | 0.758 / 0.759 | 0.969 / 0.938 | 0.735 / 0.733 |
+| 64×8191 @ 8191×2051 | 0.696 / 0.696 | 0.866 / 0.868 | 0.691 / 0.693 |
+| 65×4095 @ 4095×2051 | 0.432 / 0.437 | 0.535 / 0.531 | 0.425 / 0.426 |
+| 1024×1024 @ 1024×1024 | 0.438 / 0.432 | 0.530 / 0.549 | 0.455 / 0.451 |
 
-Aquí se mide lanzamiento sincronizado hacia una salida preasignada, no la llamada
-pública completa. El caso pequeño 257×129×513 es mixto/cercano al ruido; tampoco
-justifica promover la variante. Las pérdidas grandes sí se reproducen con
-controles muy próximos. Se conserva el kernel Vulkan actual. No se concluye que
-Vulkan carezca de margen: solo que reducir estos tiles no lo mejoró. El compilador
-y el backend ya producen comportamientos distintos con geometrías similares;
-no se atribuye la diferencia a una instrucción concreta sin ISA/perfil adicional.
-Las dos confirmaciones Vulkan conservan los bits del control. La segunda detecta
-un elemento fuera de tolerancia en `65×8191 @ 8191×2051`, idéntico en ambos
-controles y las cinco variantes (−0,10885158 frente a −0,10890857 en float64).
-También es una alerta de precisión del kernel existente, no una regresión
-introducida por el candidato. La primera ronda pasa el umbral.
+This measures synchronized launch into a preallocated output, not the full public
+call. The small 257×129×513 case is mixed/close to noise; it does not justify
+promotion either. Large losses do reproduce with very close controls. The current
+Vulkan kernel is retained. This does not conclude that Vulkan lacks room for
+improvement: only that reducing these tiles did not improve it. The compiler
+and backend already behave differently with similar geometries; the difference
+is not attributed to a specific instruction without additional ISA/profiling.
+Both Vulkan confirmations preserve control bits. The second detects one
+element outside tolerance in `65×8191 @ 8191×2051`, identical in both controls
+and all five variants (−0.10885158 versus −0.10890857 in float64). This is also
+an accuracy warning for the existing kernel, not a candidate-introduced regression.
+The first round passes the threshold.
 
-## Verificación de integración
+## Integration verification
 
-- **1.652 pruebas pasan y una se omite**: runtime y herramientas de benchmark,
-  con OpenCL, Vulkan y CUDA obligatorios y CLBlast nativo. La omitida requiere
-  un segundo dispositivo OpenCL. Se conservan 277 avisos del compilador PyOpenCL.
-- Wheel construido desde sdist: **525 pasan y 909 se omiten** en el entorno CPU
-  sin bindings GPU; imports opcionales bloqueados durante el smoke inicial.
-  El runtime empaquetado coincide byte a byte con las fuentes.
-- Ruff check y formato globales pasan; `pip check` no detecta dependencias rotas.
-- El workflow CPU incorpora ahora `tests` y `benchmarks` con su extra opcional;
-  su ejecución remota y PoCL siguen pendientes.
+- **1,652 tests pass and one is skipped**: runtime and benchmark tools, with
+  OpenCL, Vulkan, and CUDA required and native CLBlast. The skipped test requires
+  a second OpenCL device. All 277 PyOpenCL compiler warnings are retained.
+- Wheel built from sdist: **525 pass and 909 are skipped** in the CPU environment
+  without GPU bindings; optional imports blocked during initial smoke testing.
+  Packaged runtime matches sources byte for byte.
+- Global Ruff check and formatting pass; `pip check` finds no broken dependencies.
+- The CPU workflow now includes `tests` and `benchmarks` with their optional
+  extra; its remote execution and PoCL remain pending.
 
-Las pruebas funcionales aprobadas no anulan las alertas numéricas del benchmark:
-son conjuntos de inputs y objetivos diferentes. Las garantías de acumulación
-siguen siendo una tarea explícita previa a la primera estable.
+Passing functional tests does not cancel numerical benchmark warnings: they use
+different input sets and objectives. Accumulation guarantees remain an explicit
+task before the first stable release.
 
-## Próxima frontera
+## Next boundary
 
-Las transferencias siguen reduciendo muchas ganancias observadas con datos
-residentes. Las tres mejoras se aplican dentro del compilador/backend, sin
-modificar algoritmos de ejemplo para favorecer OpenPacho. La primera release
-necesita además endurecimiento de contratos, precisión y distribución; ver
-[criterios y estimación](release-readiness.md).
+Transfers still reduce many gains observed with resident data. All three
+improvements apply within the compiler/backend, without changing example
+algorithms to favor OpenPacho. The first release also needs contract, precision,
+and distribution hardening; see [criteria and estimate](release-readiness.md).

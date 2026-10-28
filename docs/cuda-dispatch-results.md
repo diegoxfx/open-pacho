@@ -1,192 +1,192 @@
-# Preparación de argumentos CUDA
+# CUDA argument preparation
 
-Ronda local del 2026-09-13, Windows / Python 3.12 / RTX 5060 Ti, driver 616.64.
-Se conserva la fusión anterior y se reduce el trabajo host de cada lanzamiento.
-En las 72 comparaciones controladas mejora el tiempo residente: la mediana de
-las mejoras porcentuales por caso es **13,9 %**. En completo esa mediana es
-**3,3 %**, con nueve resultados peores. No equivale a una aceleración universal.
+Local round from 2026-09-13, Windows / Python 3.12 / RTX 5060 Ti, driver 616.64.
+Previous fusion is retained and host work per launch is reduced.
+Resident time improves in all 72 controlled comparisons: the median of
+per-case percentage improvements is **13.9%**. For complete time that median is
+**3.3%**, with nine worse results. This is not a universal speedup.
 
-## Decisión y cambio
+## Decision and change
 
-El perfil de la [etapa anterior](cuda-fusion-results.md) señalaba preparación y
-envío como frentes pendientes. Un perfil adicional confirmó que `_run` seguía
-dedicando tiempo a construir arrays NumPy de escalares/punteros en cada llamada.
-El cambio está acotado a ese trabajo, sin modificar kernels ni algoritmos.
+The profile from the [previous stage](cuda-fusion-results.md) identified preparation and
+submission as pending areas. An additional profile confirmed that `_run` still
+spent time constructing NumPy arrays of scalars/pointers on every call.
+The change is limited to that work, without modifying kernels or algorithms.
 
-[`KernelArguments`](../src/openpacho/_cuda_arguments.py) crea una vez el vector
-`void**` y el almacenamiento host de sus valores. Cada kernel compilado conserva
-su vector; en cada lanzamiento se actualizan los valores bajo el lock del backend.
-No se guardan referencias a arrays o escalares del llamador. Las asignaciones GPU
-siguen retenidas por `_pending` hasta completar el stream, independientemente
-del almacenamiento de argumentos. La LRU de 128 módulos y `close()` liberan
-también estas plantillas.
+[`KernelArguments`](../src/openpacho/_cuda_arguments.py) creates the `void**` vector
+and host storage for its values once. Each compiled kernel retains
+its vector; values are updated on every launch under the backend lock.
+No references to caller arrays or scalars are stored. GPU allocations
+remain retained by `_pending` until the stream completes, independently
+of argument storage. The 128-module LRU and `close()` also release
+these templates.
 
-Se preservan tamaños ABI, ceros con signo y la resolución de tipos previa. Los
-punteros de dispositivo usan 64 bits; los punteros host del vector usan el tamaño
-nativo. Un cambio inesperado de cantidad o tipo de parámetros falla antes de
-lanzar. La validación detectó que NumPy 2.5.3 no permite asignar `np.bool_` a
-`ctypes.c_ubyte`: la versión final usa `ctypes.c_bool`, con representación de un
-byte comprobada. Esto no modifica las rutas float32/64 medidas.
+ABI sizes, signed zeros, and previous type resolution are preserved. Device
+pointers use 64 bits; host pointers in the vector use the native
+size. An unexpected change in parameter count or type fails before
+launch. Validation detected that NumPy 2.5.3 does not allow assigning `np.bool_` to
+`ctypes.c_ubyte`: the final version uses `ctypes.c_bool`, with a verified one-byte
+representation. This does not modify the measured float32/64 paths.
 
-El driver copia los valores apuntados por `kernelParams` durante el lanzamiento,
-por lo que la siguiente llamada puede reutilizar ese almacenamiento. Se mantiene
-separada la vida del buffer GPU apuntado.
-[Contrato de parámetros CUDA](https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__EXEC.html),
-[preparación en CUDA bindings](https://nvidia.github.io/cuda-python/cuda-bindings/13.3.2/overview.html).
+The driver copies values pointed to by `kernelParams` during launch,
+so the next call can reuse that storage. The lifetime of the pointed-to GPU buffer
+remains separate.
+[CUDA parameter contract](https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__EXEC.html),
+[preparation in CUDA bindings](https://nvidia.github.io/cuda-python/cuda-bindings/13.3.2/overview.html).
 
-No cambian los contextos, el stream, la frecuencia de sincronización, las copias,
-la política matemática ni la elección custom/cuBLAS. Los parámetros alpha/beta
-de las llamadas cuBLAS conservan su implementación anterior. El API público y
-los extras de instalación permanecen iguales.
+Contexts, stream, synchronization frequency, copies,
+math policy, and custom/cuBLAS selection are unchanged. Alpha/beta parameters
+for cuBLAS calls retain their previous implementation. The public API and
+installation extras remain the same.
 
-## Control de medición
+## Measurement control
 
-[`benchmarks/cuda_dispatch.py`](../benchmarks/cuda_dispatch.py) compara el `_run`
-del wheel anterior con el actual, en **la misma instancia/contexto y con la misma
-función compilada**. Verifica los otros métodos CUDA por AST, salvo `_compile`,
-cuyo cambio añade el campo de almacenamiento a la caché. Los demás módulos de
-runtime, incluidos generadores y lowerer, se comprueban por hash contra el wheel.
-No se ejecuta íntegramente el paquete histórico: el control aísla empaquetado.
+[`benchmarks/cuda_dispatch.py`](../benchmarks/cuda_dispatch.py) compares `_run`
+from the previous wheel with the current version, in **the same instance/context and with the same
+compiled function**. It verifies other CUDA methods by AST, except `_compile`,
+whose change adds the storage field to the cache. Other runtime
+modules, including generators and lowerer, are checked by hash against the wheel.
+The historical package is not executed in full: the control isolates packing.
 
-Se reutilizan los nueve casos de fusión, en float32/64: cadenas de 33 y 1.048.577
-elementos, energía 1025×1023, energía por filas 257×129 y 17×4099, centrado por
-filas 2049×33, pérdida cuadrática 2049×1023, covarianza 1025×65 y ridge 2049×129.
-Ridge mantiene los mismos veinte pasos; no mide tiempo hasta convergencia.
+The nine fusion cases are reused in float32/64: chains of 33 and 1,048,577
+elements, energy 1025×1023, row energy 257×129 and 17×4099, row centering
+2049×33, squared loss 2049×1023, covariance 1025×65, and ridge 2049×129.
+Ridge retains the same twenty steps; it does not measure time to convergence.
 
-- Dos rondas por proveedor, **31 pares alternados** por caso/alcance. El orden
-  de los procesos se invierte en la segunda ronda y el de las variantes cambia
-  en cada par. Primera llamada y calentamiento quedan fuera de las muestras.
-- Residente: entradas/preparación ya disponibles, cálculo y sincronización.
-  Completo: subida, preparación, cálculo y descarga, con kernels/planes calientes.
-  Ambos son tiempos de pared con Python/driver/esperas, no solo ejecución GPU.
-- Reposo observado antes de cada proceso: al menos 10 s, tres lecturas con
-  utilización GPU/memoria ≤5 %, temperatura dentro de 2 °C de la referencia y
-  ≤52 °C, sin ralentización térmica observada. Después, calentamiento de al menos
-  tres llamadas y 0,25 s por modo/alcance. Las ventanas aceptadas terminan a
-  46–48 °C tras 10,4 s. No garantiza clocks constantes durante las muestras.
-- **144 configuraciones CUDA y 92 referencias** completadas. Las referencias
-  actuales son NumPy de ocho hilos y CuPy eager/fuse. OpenCL/Vulkan se verifican
-  funcionalmente; sus tiempos anteriores se conservan como históricos.
-- Diagnóstico con instrumentación y eventos separado de las muestras de tiempo.
-  Se conservan todos los samples, p10/p90, primera llamada y errores.
+- Two rounds per provider, **31 alternating pairs** per case/scope. Process
+  order is reversed in the second round, and variant order changes
+  in every pair. First call and warm-up remain outside the samples.
+- Resident: inputs/preparation already available, computation and synchronization.
+  Complete: upload, preparation, computation, and download, with warm kernels/plans.
+  Both are wall times with Python/driver/waits, not just GPU execution.
+- Observed idle state before each process: at least 10 s, three readings with
+  GPU/memory utilization ≤5%, temperature within 2 °C of the reference and
+  ≤52 °C, with no observed thermal throttling. Then, warm-up of at least
+  three calls and 0.25 s per mode/scope. Accepted windows end at
+  46–48 °C after 10.4 s. This does not guarantee constant clocks during samples.
+- **144 CUDA configurations and 92 references** completed. Current references
+  are eight-thread NumPy and CuPy eager/fuse. OpenCL/Vulkan are checked
+  functionally; their earlier timings are retained as historical.
+- Instrumented diagnostics and events are separate from timing samples.
+  All samples, p10/p90, first call, and errors are retained.
 
-La primera tentativa falló en la validación del wheel por una ruta incorrecta
-del runner, antes de medir. Se corrigió y su log permanece en `control/`; las
-mediciones válidas están en `paired/`. La corrección final de la constante ABI
-bool se hizo después de esta tanda exclusivamente flotante; el seguimiento y
-la suite completa sí usan esa corrección. Los hashes originales se conservan.
+The first attempt failed wheel validation because of an incorrect runner
+path, before measuring. It was corrected and its log remains in `control/`;
+valid measurements are in `paired/`. The final Boolean ABI constant correction
+was made after this exclusively floating-point batch; follow-up and
+the full suite do use that correction. Original hashes are retained.
 
-## Resultados antes y después
+## Before and after results
 
-Milisegundos, medianas **ronda 1 / ronda 2**. El control anterior ya incluye fusión.
-No deben encadenarse porcentajes con otras rondas tomadas en momentos distintos.
+Milliseconds, medians **round 1 / round 2**. The previous control already includes fusion.
+Percentages must not be chained with other rounds taken at different times.
 
-| Caso | Residente anterior | Residente actual | Completo anterior | Completo actual |
+| Case | Previous resident | Current resident | Previous complete | Current complete |
 | --- | ---: | ---: | ---: | ---: |
-| cuBLAS, cadena grande f32 | 0,086 / 0,087 | 0,073 / 0,073 | 2,441 / 2,531 | 2,422 / 2,498 |
-| cuBLAS, energía f32 | 0,162 / 0,179 | 0,140 / 0,151 | 1,653 / 1,645 | 1,636 / 1,625 |
-| cuBLAS, centrado por filas f32 | 0,225 / 0,229 | 0,187 / 0,189 | 0,723 / 0,568 | 0,683 / 0,536 |
-| Custom, ridge f32 | 7,679 / 6,300 | 6,125 / 5,183 | 6,991 / 6,900 | 5,673 / 5,743 |
-| Custom, ridge f64 | 6,946 / 8,097 | 5,149 / 6,896 | 7,594 / 9,369 | 6,365 / 8,034 |
-| cuBLAS, ridge f32 | 6,961 / 5,891 | 6,105 / 5,410 | 7,111 / 6,675 | 8,455 / 6,128 |
-| cuBLAS, ridge f64 | 5,981 / 6,170 | 5,371 / 5,504 | 6,772 / 6,982 | 6,269 / 6,453 |
+| cuBLAS, large chain f32 | 0.086 / 0.087 | 0.073 / 0.073 | 2.441 / 2.531 | 2.422 / 2.498 |
+| cuBLAS, energy f32 | 0.162 / 0.179 | 0.140 / 0.151 | 1.653 / 1.645 | 1.636 / 1.625 |
+| cuBLAS, row centering f32 | 0.225 / 0.229 | 0.187 / 0.189 | 0.723 / 0.568 | 0.683 / 0.536 |
+| Custom, ridge f32 | 7.679 / 6.300 | 6.125 / 5.183 | 6.991 / 6.900 | 5.673 / 5.743 |
+| Custom, ridge f64 | 6.946 / 8.097 | 5.149 / 6.896 | 7.594 / 9.369 | 6.365 / 8.034 |
+| cuBLAS, ridge f32 | 6.961 / 5.891 | 6.105 / 5.410 | 7.111 / 6.675 | 8.455 / 6.128 |
+| cuBLAS, ridge f64 | 5.981 / 6.170 | 5.371 / 5.504 | 6.772 / 6.982 | 6.269 / 6.453 |
 
-Las 72 mejoras residentes están entre **7,7 % y 31,3 %**. Las mediciones completas
-mejoran en 63 de 72 comparaciones, con resultados mixtos en cadenas grandes,
-pérdida cuadrática, covarianza f64 y energía por filas f64. No se atribuyen
-automáticamente esas diferencias a PCIe ni a un kernel.
+The 72 resident improvements range from **7.7% to 31.3%**. Complete measurements
+improve in 63 of 72 comparisons, with mixed results for large chains,
+squared loss, f64 covariance, and f64 row energy. These differences are not
+automatically attributed to PCIe or a kernel.
 
-### Seguimiento del resultado adverso cuBLAS ridge f32
+### Follow-up on the adverse cuBLAS ridge f32 result
 
-La pérdida completa del 18,9 % de la primera ronda motivó tres bloques adicionales,
-con 51 pares alternados por alcance, reposo observado y el mismo algoritmo:
+The 18.9% complete-time loss in the first round motivated three additional blocks,
+with 51 alternating pairs per scope, observed idle state, and the same algorithm:
 
-| Bloque | Residente anterior → actual | Completo anterior → actual |
+| Block | Previous → current resident | Previous → current complete |
 | --- | ---: | ---: |
-| 1 | 6,124 → 5,660 ms | 6,757 → 6,260 ms |
-| 2 | 6,311 → 5,861 ms | 6,759 → 6,181 ms |
-| 3 | 6,123 → 5,599 ms | 6,893 → 6,347 ms |
+| 1 | 6.124 → 5.660 ms | 6.757 → 6.260 ms |
+| 2 | 6.311 → 5.861 ms | 6.759 → 6.181 ms |
+| 3 | 6.123 → 5.599 ms | 6.893 → 6.347 ms |
 
-La pérdida no se reprodujo en esos bloques; tampoco se descarta el dato inicial.
-Las mediciones completas muestran variación incluso en CuPy: ridge f32 dio
-4,806 / 7,320 ms. No hay evidencia suficiente para una excepción por workload.
+The loss did not reproduce in those blocks; the initial datum is not discarded either.
+Complete measurements show variation even in CuPy: ridge f32 took
+4.806 / 7.320 ms. There is insufficient evidence for a workload-specific exception.
 
-## Qué queda por optimizar
+## What remains to optimize
 
-Un control **solo de CPU** para cuatro argumentos, con 31 tandas alternadas de
-2000 llamadas, baja de **6,0 a 0,70 μs** por empaquetado. No incluye driver,
-binding del compilador, asignación, kernel ni sincronización. El coste de este
-subpaso ya es pequeño; seguir afinándolo ofrece menos margen que otros frentes.
+A **CPU-only** control for four arguments, with 31 alternating batches of
+2000 calls, falls from **6.0 to 0.70 μs** per packing operation. It includes neither driver,
+compiler binding, allocation, kernel, nor synchronization. The cost of this
+substep is already small; further refinement offers less headroom than other areas.
 
-La cadena grande f32 tarda 73 μs residente con CUDA/cuBLAS y **30 / 33 μs** con
-CuPy fuse. Sus tiempos completos quedan próximos por las copias: CUDA 2,422 /
-2,498 ms frente a CuPy fuse 2,440 / 2,434 ms. En energía, CuPy eager sigue siendo
-mejor que su fuse: 0,137 / 0,099 ms frente a 0,401 / 0,406 ms residentes.
-No se escoge únicamente el modo de CuPy que favorece al comparador.
+The large f32 chain takes 73 μs resident with CUDA/cuBLAS and **30 / 33 μs** with
+CuPy fuse. Their complete times are close because of copies: CUDA 2.422 /
+2.498 ms versus CuPy fuse 2.440 / 2.434 ms. For energy, CuPy eager remains
+better than its fuse: 0.137 / 0.099 ms versus 0.401 / 0.406 ms resident.
+The CuPy mode favoring the comparator is not the only one selected.
 
-NumPy sigue ganando ridge en este tamaño: **1,111 / 1,093 ms completos**. El
-objetivo de esta ronda es quitar coste de abstracción, sin presentar una mejora
-relativa propia como superioridad sobre CPU u otras bibliotecas.
+NumPy still wins ridge at this size: **1.111 / 1.093 ms complete**. This
+round's goal is to remove abstraction cost, without presenting an improvement
+relative to our own version as superiority over CPU or other libraries.
 
-El diagnóstico conserva el número de lanzamientos: ridge custom usa 80 kernels
-propios; cuBLAS usa 40 kernels propios y los cuarenta productos del algoritmo.
-En ridge cuBLAS aparecen **243 pares push/pop de contexto** en la llamada
-instrumentada, incluidas sincronizaciones y reciclaje. Reducir esa repetición
-merece un control separado, con restauración del contexto y concurrencia probadas.
+Diagnostics retain launch counts: custom ridge uses 80 custom
+kernels; cuBLAS uses 40 custom kernels and the algorithm's forty products.
+In cuBLAS ridge, **243 context push/pop pairs** appear in the instrumented
+call, including synchronization and recycling. Reducing that repetition
+warrants a separate control, with context restoration and concurrency tested.
 
-Los eventos de la cadena grande CUDA/cuBLAS delimitan unos 28 μs en el primer
-diagnóstico, frente a 73 μs de pared sin instrumentar. **No se resta una cifra
-de la otra para afirmar un coste Python exacto**: los intervalos de eventos pueden
-incluir huecos de envío/cola y la instrumentación cambia la ejecución. Son
-indicadores de que aún hay margen, no una cota física de NVIDIA.
-[Semántica de eventos CUDA](https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__EVENT.html).
+Events for the large CUDA/cuBLAS chain delimit about 28 μs in the first
+diagnostic, versus 73 μs uninstrumented wall time. **One figure is not subtracted
+from the other to assert an exact Python cost**: event intervals may
+include submission/queue gaps, and instrumentation changes execution. They are
+indicators of remaining headroom, not a physical NVIDIA bound.
+[CUDA event semantics](https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__EVENT.html).
 
-La prioridad siguiente rota fuera del empaquetado de argumentos: controlar
-activaciones de contexto/envío y binding del plan; comparar su ahorro posible
-con GEMV/DOT, reducciones por eje y layouts. Vulkan/OpenCL mantienen esos frentes
-abiertos. No se cambia una ruta por inercia ni se debilita el contrato para ganar.
+The next priority shifts away from argument packing: control
+context activations/submission and plan binding; compare their possible savings
+with GEMV/DOT, axis reductions, and layouts. Vulkan/OpenCL keep those areas
+open. No path is changed out of inertia, nor is the contract weakened to win.
 
-## Precisión y verificación
+## Accuracy and verification
 
-Los resultados de ambas variantes son exactamente iguales en todos los casos
-controlados. Frente a NumPy calculado en float64, los máximos relativos L2 son:
+Both variants' results are exactly equal in all controlled
+cases. Against NumPy computed in float64, maximum relative L2 errors are:
 
-| Ruta actual | float32 | float64 |
+| Current path | float32 | float64 |
 | --- | ---: | ---: |
-| CUDA custom | 4,36×10⁻⁷ | 8,20×10⁻¹⁶ |
-| CUDA cuBLAS | 8,37×10⁻⁸ | 3,19×10⁻¹⁶ |
-| CuPy, ambos modos | 1,80×10⁻⁷ | 3,06×10⁻¹⁶ |
+| CUDA custom | 4.36×10⁻⁷ | 8.20×10⁻¹⁶ |
+| CUDA cuBLAS | 8.37×10⁻⁸ | 3.19×10⁻¹⁶ |
+| CuPy, both modes | 1.80×10⁻⁷ | 3.06×10⁻¹⁶ |
 
-Float64 se compara con una referencia de igual precisión, no con una solución
-exacta. El máximo absoluto CUDA float32 es 0,00489; los errores se conservan por
-caso junto a los tiempos. No son garantías para entradas diferentes.
+Float64 is compared with an equal-precision reference, not an exact
+solution. Maximum absolute CUDA float32 error is 0.00489; errors are retained per
+case alongside timings. They are not guarantees for different inputs.
 
-La suite completa con OpenCL/Vulkan/CUDA obligatorios y CLBlast nativo da
-**1200 pruebas pasando y una omitida** por necesitar dos dispositivos OpenCL.
-Las regresiones nuevas cubren bytes/tamaños ABI, ceros con signo, reenlace sin
-retención de inputs, tipos/cantidad incorrectos, lanzamiento fallido y reintento,
-lock, liberación con expulsión del módulo y resultados booleanos en la GPU.
-La validación existente cubre concurrencia, precisión adversa, colas/rectangulares,
-RNG, vida de buffers y restauración de contexto. Ver [empaquetado y controles](verification.md).
+The complete suite with OpenCL/Vulkan/CUDA required and native CLBlast has
+**1200 passing tests and one skip** because two OpenCL devices are required.
+New regressions cover ABI bytes/sizes, signed zeros, rebinding without
+input retention, incorrect types/counts, failed launch and retry,
+locking, release on module eviction, and Boolean results on the GPU.
+Existing validation covers concurrency, adversarial accuracy, tails/rectangles,
+RNG, buffer lifetimes, and context restoration. See [packaging and controls](verification.md).
 
-## Artefactos y reproducción
+## Artifacts and reproduction
 
-`.artifacts/cuda-dispatch/summary.csv` reúne las 236 configuraciones principales;
-`paired-gains.csv` registra las 72 comparaciones y diferencias de pares.
-`paired/` y `references/` conservan JSON, muestras, comandos y telemetría. El
-seguimiento está en `ridge-followup.json` (seis configuraciones adicionales),
-su script y su gate; el diagnóstico CPU en `packing_profile.py/json`.
-Los perfiles cProfile son diagnósticos instrumentados, no benchmarks GPU.
+`.artifacts/cuda-dispatch/summary.csv` collects the 236 main configurations;
+`paired-gains.csv` records the 72 comparisons and paired differences.
+`paired/` and `references/` retain JSON, samples, commands, and telemetry. The
+follow-up is in `ridge-followup.json` (six additional configurations),
+its script, and its gate; the CPU diagnostic is in `packing_profile.py/json`.
+cProfile profiles are instrumented diagnostics, not GPU benchmarks.
 
-El wheel local anterior tiene SHA256
+The previous local wheel has SHA256
 `013d623c9d2a0504d1a4e6177fa83e5e0953519dc18d418788cc9c95eeead97b`.
-Con extras instalados, usar carpetas de salida nuevas:
+With extras installed, use new output directories:
 
 ```powershell
 python -m benchmarks.isolated --worker cuda_dispatch --backends cuda-custom,cuda-cublas --rounds 2 --repeats 31 --max-temperature 52 --control-wheel .artifacts/cuda-dispatch/before.whl --output .artifacts/cuda-dispatch/paired
 python -m benchmarks.isolated --worker cuda_dispatch --backends numpy-8t,cupy --rounds 2 --repeats 31 --max-temperature 52 --output .artifacts/cuda-dispatch/references
 ```
 
-La asociación automática backend/UUID de telemetría sigue pendiente. El hardware
-observado es el mismo de la ronda anterior; Linux y otros fabricantes no fueron
-verificados físicamente. La versión sigue siendo 0.1.0a1, sin publicación.
+Automatic backend/telemetry UUID association remains pending. Observed hardware
+is the same as in the previous round; Linux and other vendors were not
+physically verified. The version remains 0.1.0a1, without publication.

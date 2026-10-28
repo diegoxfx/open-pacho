@@ -1,10 +1,10 @@
-# CUDA inicial
+# Initial CUDA
 
-Implementación inicial del 2026-09-12, ampliada con lotes, tiling, fusión y
-GEMV/DOT cooperativos; actualización de normas estables: 2026-10-22.
-CUDA se selecciona explícitamente y conserva el
-API de arrays de OpenPacho. Es una primera base funcional; todavía tiene menos
-operaciones y optimizaciones que OpenCL/Vulkan.
+Initial implementation from 2026-09-12, extended with batches, tiling, fusion, and
+cooperative GEMV/DOT; stable-norm update: 2026-10-22.
+CUDA is selected explicitly and preserves OpenPacho's
+array API. It is an initial functional foundation; it still has fewer
+operations and optimizations than OpenCL/Vulkan.
 
 ```powershell
 python -m pip install ".[cuda]"
@@ -12,13 +12,13 @@ pacho devices --backend cuda
 pacho benchmark --backend cuda --size 129 --repeat 7
 ```
 
-La instalación anterior se ejecuta desde este repositorio; el paquete todavía
-no se publica en PyPI. Requiere GPU NVIDIA, driver compatible con las bibliotecas CUDA 13 instaladas y
-NVRTC. El extra incorpora CUDA bindings, NVRTC, los bindings de nvmath y cuBLAS.
-La importación CPU no carga estos módulos. El runtime no depende de arrays ni
-operaciones de CuPy; los comparadores CuPy y nvmath Matmul siguen siendo externos.
-La validación física de esta etapa corresponde a Windows y RTX 5060 Ti; Linux
-y otros dispositivos todavía requieren verificación.
+The installation above runs from this repository; the package is not yet
+published on PyPI. It requires an NVIDIA GPU, a driver compatible with the installed CUDA 13 libraries, and
+NVRTC. The extra includes CUDA bindings, NVRTC, nvmath bindings, and cuBLAS.
+CPU import does not load these modules. The runtime depends on neither CuPy arrays nor
+operations; CuPy and nvmath Matmul comparators remain external.
+Physical validation at this stage is on Windows and RTX 5060 Ti; Linux
+and other devices still require verification.
 
 ```python
 import numpy as np
@@ -31,150 +31,150 @@ c = (a @ b) * 0.5 + 2
 host = pacho.asnumpy(c)
 ```
 
-`blas="custom"` selecciona productos propios mediante NVRTC. GEMM float32 elegible
-reutiliza el generador con tiles y registros de OpenCL/Vulkan: 64 hilos por tile
-de salida 32×32, con 4×4 acumuladores por hilo y 4 KiB compartidos. Los límites
-del dispositivo y de índices se comprueban antes de seleccionarlo. Otros tamaños
-y float64 conservan el kernel directo para GEMM. Los productos con vector derecho
-y dimensión interna de al menos 256 usan una reducción cooperativa de 128 hilos
-por fila, también en float64 y lotes contiguos. DOT de más de 4096 elementos usa
-parciales de 1024 términos y una reducción posterior en GPU. Es la adaptación
-del algoritmo probado en OpenCL; no depende de extensiones de una familia NVIDIA.
-No hay autotuning. El proveedor por defecto es `cublas`; `clblast`
-y `clblast_library` no son configuraciones válidas de CUDA. No se cambia a CPU
-si falta el driver, una biblioteca o una operación.
+`blas="custom"` selects custom products through NVRTC. Eligible float32 GEMM
+reuses OpenCL/Vulkan's tiled register generator: 64 threads per 32×32 output
+tile, with 4×4 accumulators per thread and 4 KiB of shared memory. Device
+and index limits are checked before selecting it. Other sizes
+and float64 retain the direct GEMM kernel. Products with a right-hand vector
+and inner dimension of at least 256 use a cooperative reduction of 128 threads
+per row, also for float64 and contiguous batches. DOT with more than 4096 elements uses
+partials of 1024 terms and a subsequent GPU reduction. This adapts
+the algorithm tested in OpenCL; it does not depend on extensions from an NVIDIA family.
+There is no autotuning. The default provider is `cublas`; `clblast`
+and `clblast_library` are not valid CUDA configurations. It does not switch to CPU
+if a driver, library, or operation is missing.
 
-GEMM custom añade dos dimensiones de tile menores para matrices con pocas filas:
-en CUDA, 16×16 salidas y bloques K=32. La selección es interna y conservadora;
-los casos no elegibles mantienen el kernel anterior. No introduce padding,
-copias adicionales, tipos reducidos ni flags matemáticos. Ver el alcance y las
-[mediciones de las tres iteraciones](three-iterations-results.md).
+Custom GEMM adds two smaller tile dimensions for matrices with few rows:
+in CUDA, 16×16 outputs and K=32 blocks. Selection is internal and conservative;
+ineligible cases keep the previous kernel. It introduces no padding,
+additional copies, reduced types, or mathematical flags. See the scope and
+[three-iteration measurements](three-iterations-results.md).
 
-Con `blas="custom"`, `compile(..., padding=True)` o
-`matmul(..., padding=True)` permiten [alinear GEMM float32](padding.md) usando
-buffers privados y recorte en GPU. Se conserva `padding=False` por defecto;
-cuBLAS y los demás casos mantienen su ruta. Las copias preservan los bits de
-float32 y la opción no modifica `ftz`, `fmad` ni otros flags matemáticos.
+With `blas="custom"`, `compile(..., padding=True)` or
+`matmul(..., padding=True)` allow [float32 GEMM alignment](padding.md) using
+private buffers and GPU cropping. `padding=False` remains the default;
+cuBLAS and other cases retain their path. Copies preserve float32
+bits, and the option does not modify `ftz`, `fmad`, or other mathematical flags.
 
-## Alcance comprobable
+## Verifiable scope
 
-| Operación | Alcance |
+| Operation | Scope |
 | --- | --- |
-| float32/float64; bool para resultados y almacenamiento | Admitidos; enteros y otros dtypes producen error explícito |
-| Construcción, subida, descarga, copia, reshape | Admitidos; arrays propios residentes |
-| Aleatorios | [Philox4x32-10](random.md) propio: random/uniform/normal/exponential float32/64, sin cuRAND ni CuPy como dependencia |
-| Aritmética, comparaciones y funciones elementwise del subconjunto común | Incluye `where(condition, x, y)` con broadcasting de tres argumentos, condición bool o numérica, sin descargas; dtype promovido desde las ramas |
-| Slicing básico, transposición y diagonal | Gather GPU; las salidas copian según el contrato común |
-| sum/mean por ejes, keepdims | Reducción por bloques con parciales para ejes largos; acumulación flotante |
-| min/max (amin/amax) por ejes, keepdims | Conservan float32/64 o bool; NaN propagado y empates de cero deterministas; eager y compile/map-reduce |
-| Dot, GEMV y GEMM, incluido matmul por lotes broadcast | cuBLAS o producto custom; formas rectangulares, impares y vacías |
-| compile como función/decorador | Captura y reutiliza el plan; `CUDALowering` fusiona grupos elementwise/map-reduce admitidos, incluida la selección `where` |
-| Normas estables | Norma euclídea/Frobenius escalada en float32/float64, eager y compilada; disponible con `blas="custom"` y `blas="cublas"` |
-| Acumulador bool en sum | No admitido; sí se admite sumar entradas bool con acumulador float32/64 explícito. min/max sí conservan bool |
-| Fusión CUDA elementwise/map-reduce | Admitida mediante `backend.create_lowering()` y NVRTC |
-| Graphs, transferencias pinned/solapadas | Pendientes |
+| float32/float64; bool for results and storage | Supported; integers and other dtypes produce an explicit error |
+| Construction, upload, download, copy, reshape | Supported; owned resident arrays |
+| Random generation | Custom [Philox4x32-10](random.md): random/uniform/normal/exponential float32/64, without cuRAND or CuPy as a dependency |
+| Arithmetic, comparisons, and elementwise functions in the shared subset | Includes `where(condition, x, y)` with three-argument broadcasting, Boolean or numeric condition, without downloads; dtype promoted from branches |
+| Basic slicing, transposition, and diagonal | GPU gather; outputs copy according to the shared contract |
+| sum/mean over axes, keepdims | Block reduction with partials for long axes; floating-point accumulation |
+| min/max (amin/amax) over axes, keepdims | Preserve float32/64 or bool; NaN propagated and deterministic zero ties; eager and compile/map-reduce |
+| Dot, GEMV, and GEMM, including broadcast batched matmul | cuBLAS or custom product; rectangular, odd, and empty shapes |
+| compile as function/decorator | Captures and reuses the plan; `CUDALowering` fuses supported elementwise/map-reduce groups, including `where` selection |
+| Stable norms | Scaled Euclidean/Frobenius norm in float32/float64, eager and compiled; available with `blas="custom"` and `blas="cublas"` |
+| Boolean accumulator in sum | Unsupported; summing Boolean inputs with an explicit float32/64 accumulator is supported. min/max do preserve bool |
+| CUDA elementwise/map-reduce fusion | Supported through `backend.create_lowering()` and NVRTC |
+| Graphs, pinned/overlapped transfers | Pending |
 
-La suma booleana por defecto solicita int64 mediante el contrato común, que
-esta etapa no soporta. Puede elegirse acumulación float32/64 explícitamente.
-`compile` no habilita operaciones fuera de esta tabla; los benchmarks etiquetan
-su ejecución CUDA compilada como `backend-plan`. CUDA ofrece una factoría propia
-`create_lowering()` que proporciona `CUDALowering` para los grupos elementwise y
-map-reduce admitidos. Matmul y BLAS permanecen fuera de esa fusión. Las variantes
-de reducción usan 128 lanes y chunks de hasta 4096 términos, con NVRTC sin FMA ni
-FTZ implícitos (`fmad=false`, `ftz=false`). Consulta los [resultados de fusión CUDA](cuda-fusion-results.md).
-Las normas estables usan el lowering genérico cuando se compilan y están
-disponibles con ambos proveedores BLAS; `blas` continúa eligiendo solo el
-proveedor de productos. Consulta el [alcance de normas CUDA](cuda-norm-results.md).
-Los solvers permanecen en [examples](../examples/README.md), fuera del paquete;
-sus algoritmos no forman parte del runtime.
+Default Boolean summation requests int64 through the shared contract, which
+this stage does not support. Float32/64 accumulation can be selected explicitly.
+`compile` does not enable operations outside this table; benchmarks label
+its compiled CUDA execution as `backend-plan`. CUDA offers its own
+`create_lowering()` factory providing `CUDALowering` for supported elementwise and
+map-reduce groups. Matmul and BLAS remain outside that fusion. Reduction
+variants use 128 lanes and chunks of up to 4096 terms, with NVRTC without implicit FMA or
+FTZ (`fmad=false`, `ftz=false`). See the [CUDA fusion results](cuda-fusion-results.md).
+Stable norms use generic lowering when compiled and are
+available with both BLAS providers; `blas` continues to choose only the
+product provider. See the [CUDA norm scope](cuda-norm-results.md).
+Solvers remain in [examples](../examples/README.md), outside the package;
+their algorithms are not part of the runtime.
 
-Los lotes regulares de cuBLAS usan `gemm_strided_batched` en una llamada, con
-strides positivos en elementos. Broadcasting general reutiliza punteros de las
-entradas y ejecuta GEMM por lote; no replica matrices ni usa strides cero fuera
-del contrato documentado. Queda margen para un adaptador batched de punteros en
-dispositivo. Custom calcula todos los lotes en el mismo lanzamiento. La promoción
-de vectores, resultados vacíos y K=0 conserva la semántica común de matmul.
-Ver [mediciones de la ampliación](backend-sharing-results.md).
+Regular cuBLAS batches use `gemm_strided_batched` in one call, with
+positive strides in elements. General broadcasting reuses input
+pointers and executes GEMM per batch; it neither replicates matrices nor uses zero strides outside
+the documented contract. There is room for a batched adapter with device-side pointers.
+Custom computes all batches in the same launch. Vector promotion,
+empty results, and K=0 preserve shared matmul semantics.
+See [extension measurements](backend-sharing-results.md).
 
-Desde la ronda del 2026-09-24, dos vectores usan `sdot`/`ddot`, con salida escalar
-residente. Si un operando es vector y el otro tiene batch explícito, se usa GEMV
-por matriz con offsets contiguos; admite batch singleton y múltiples ejes.
-Los productos matriz-vector/vector-matriz sin batch conservan GEMM: seleccionar
-GEMV universalmente fue más lento en la suite medida. La ganancia batched incluye
-el bucle host más sencillo y no prueba que todo kernel GEMV gane a GEMM.
+Since the 2026-09-24 round, two vectors use `sdot`/`ddot`, with a resident scalar
+output. If one operand is a vector and the other has an explicit batch, GEMV
+is used per matrix with contiguous offsets; singleton batches and multiple axes are supported.
+Unbatched matrix-vector/vector-matrix products retain GEMM: selecting
+GEMV universally was slower in the measured suite. The batched gain includes
+a simpler host loop and does not prove that every GEMV kernel beats GEMM.
 
-## Memoria, ejecución y precisión
+## Memory, execution, and accuracy
 
-El backend retiene el contexto primario y usa un stream no bloqueante propio.
-Cada llamada activa temporalmente ese contexto y restaura el del llamador; no
-resetea el contexto primario compartido con otras bibliotecas. Un lock protege
-estado, lanzamiento y argumentos. Las operaciones pendientes retienen sus buffers
-hasta sincronizar; el límite inicial es 64 lanzamientos. El pool de CUDA reutiliza
-tamaños exactos completados, expulsa entradas antiguas y conserva como máximo
-128 buffers/128 MiB solicitados al driver, sin medir su redondeo físico interno.
-No incorpora todavía la reutilización por capacidad de Vulkan.
+The backend retains the primary context and uses its own nonblocking stream.
+Each call temporarily activates that context and restores the caller's; it does
+not reset the primary context shared with other libraries. A lock protects
+state, launch, and arguments. Pending operations retain their buffers
+until synchronization; the initial limit is 64 launches. CUDA's pool reuses
+completed exact sizes, evicts old entries, and retains at most
+128 buffers/128 MiB requested from the driver, without measuring its internal physical rounding.
+It does not yet include Vulkan's capacity-based reuse.
 
-El plan compilado de al menos dos pasos mantiene el contexto y lock durante su
-ejecución. Los planes más cortos evitan ese coste adicional en host. Las
-activaciones anidadas comprueban el contexto actual del hilo y evitan otro
-push/pop cuando ya coincide. Si otra biblioteca activa uno distinto, se activa
-temporalmente el propio y se restaura aquel. No se añade una espera GPU ni se
-cambia el límite de operaciones pendientes. Ver el
-[contrato de contexto del Driver API](https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__CTX.html).
+A compiled plan with at least two steps holds the context and lock during
+execution. Shorter plans avoid that additional host cost. Nested
+activations check the thread's current context and avoid another
+push/pop when it already matches. If another library activates a different one, the backend's own
+context is temporarily activated and the other restored. No GPU wait is added and
+the pending-operation limit is unchanged. See the
+[Driver API context contract](https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__CTX.html).
 
-Cada módulo CUDA compilado conserva un vector de argumentos `ctypes` con
-almacenamiento host estable para `kernelParams`. El vector se vuelve a enlazar en
-cada despacho bajo el mismo lock y solo contiene copias de valores numéricos y
-direcciones de dispositivo; la plantilla no retiene arrays ni escalares del
-llamador. Las asignaciones de dispositivo siguen retenidas en `_pending` hasta
-`synchronize()`. La LRU de 128 entradas y `close()`, después de sincronizar,
-liberan el módulo y su vector de argumentos. Esta optimización solo cambia el
-empaquetado de parámetros; no cambia kernels, matemática, contextos ni stream.
-Ver [mediciones del despacho CUDA](cuda-dispatch-results.md).
+Each compiled CUDA module retains a `ctypes` argument vector with
+stable host storage for `kernelParams`. The vector is rebound on
+every dispatch under the same lock and contains only copies of numerical values and
+device addresses; the template retains neither caller arrays nor
+scalars. Device allocations remain retained in `_pending` until
+`synchronize()`. The 128-entry LRU and `close()`, after synchronization,
+release the module and its argument vector. This optimization changes only
+parameter packing; it changes neither kernels, math, contexts, nor stream.
+See [CUDA dispatch measurements](cuda-dispatch-results.md).
 
-La subida mediante Driver API termina su copia antes de retornar, por lo que
-modificar el input NumPy después no modifica la GPU. La descarga espera el stream.
-La subida completa explícitamente el stream por defecto después de HtoD:
-memoria host paginable puede terminar de copiarse a staging antes de que termine
-el DMA al dispositivo. Nuestro stream no bloqueante no hereda esa dependencia.
-Es una frontera conservadora inicial, no una implementación de copias solapadas.
-[Contrato de copias](https://docs.nvidia.com/cuda/cuda-driver-api/api-sync-behavior.html),
-[dependencias entre streams](https://docs.nvidia.com/cuda/cuda-driver-api/stream-sync-behavior.html).
-`release_cached_memory()` sincroniza y libera solo memoria libre; las salidas
-vivas permanecen válidas. `close()` libera recursos propios e invalida arrays de
-ese backend con un error de backend cerrado. No resetea recursos de terceros.
+Upload through Driver API completes its copy before returning, so
+modifying the NumPy input afterward does not modify the GPU. Download waits for the stream.
+Upload explicitly completes the default stream after HtoD:
+pageable host memory may finish copying to staging before device DMA
+completes. Our nonblocking stream does not inherit that dependency.
+This is an initial conservative boundary, not an implementation of overlapped copies.
+[Copy contract](https://docs.nvidia.com/cuda/cuda-driver-api/api-sync-behavior.html),
+[stream dependencies](https://docs.nvidia.com/cuda/cuda-driver-api/stream-sync-behavior.html).
+`release_cached_memory()` synchronizes and releases only free memory; live outputs
+remain valid. `close()` releases owned resources and invalidates arrays from
+that backend with a closed-backend error. It does not reset third-party resources.
 
-cuBLAS usa `PEDANTIC_MATH`, punteros escalares host y el stream propio. DOT cambia
-temporalmente el pointer mode a DEVICE para escribir el resultado en GPU; el
-lock protege el cambio y un `finally` restaura HOST. Si restaurarlo falla, el
-backend lo registra y debe recuperar HOST antes de cualquier nuevo producto
-BLAS. Los buffers enviados se retienen incluso si la restauración falla. NVRTC
-compila sin fast-math, con `fmad=false`, `ftz=false` y división/raíz precisas.
-No se modifica globalmente la configuración matemática de otras bibliotecas.
-El [experimento de contracción float64](fp64-contraction-results.md) compara
-ejecutables aislados con y sin FMA, con oráculos distintos para cada política.
-Sus flags no se aplican al backend: CUDA custom conserva `fmad=false`.
-Los árboles de reducción pueden diferir de NumPy/cuBLAS: se comparan errores,
-no se promete identidad bit a bit entre proveedores. La suma ordinaria puede
-desbordarse o perder precisión por cancelación; todavía no sustituye una norma
-escalada ni ofrece garantías generales de estabilidad.
+cuBLAS uses `PEDANTIC_MATH`, host scalar pointers, and the dedicated stream. DOT temporarily
+changes pointer mode to DEVICE to write the result on the GPU; the
+lock protects the change and a `finally` restores HOST. If restoration fails, the
+backend records it and must recover HOST before any new BLAS
+product. Submitted buffers are retained even if restoration fails. NVRTC
+compiles without fast-math, with `fmad=false`, `ftz=false`, and precise division/square root.
+Other libraries' mathematical settings are not changed globally.
+The [float64 contraction experiment](fp64-contraction-results.md) compares
+isolated executables with and without FMA, with distinct oracles for each policy.
+Its flags are not applied to the backend: CUDA custom retains `fmad=false`.
+Reduction trees may differ from NumPy/cuBLAS: errors are compared,
+and bitwise identity between providers is not promised. Ordinary summation may
+overflow or lose accuracy through cancellation; it still neither substitutes for a scaled
+norm nor provides general stability guarantees.
 
-Las cachés son locales al contexto/backend y no escriben kernels en el directorio
-personal del usuario.
+Caches are local to the context/backend and do not write kernels to the user's
+home directory.
 
-Fuentes primarias para los contratos utilizados:
-[Driver API y NVRTC en CUDA bindings](https://nvidia.github.io/cuda-python/cuda-bindings/13.3.0/overview.html),
-[modo matemático cuBLAS](https://docs.nvidia.com/cuda/cublas/index.html).
+Primary sources for the contracts used:
+[Driver API and NVRTC in CUDA bindings](https://nvidia.github.io/cuda-python/cuda-bindings/13.3.0/overview.html),
+[cuBLAS math mode](https://docs.nvidia.com/cuda/cublas/index.html).
 
-## Comparación reproducible
+## Reproducible comparison
 
-La suite aplicada admite los dos proveedores CUDA como opciones adicionales:
+The applied suite supports both CUDA providers as additional options:
 
 ```powershell
 python -m benchmarks.applications --backends opencl,opencl-clblast,vulkan,cupy,cuda-cublas,cuda-custom --repeats 7 --output .artifacts/benchmarks/cuda-applications.json
 python -m benchmarks.applications --irregular --backends opencl,opencl-clblast,vulkan,cupy,cuda-cublas,cuda-custom --repeats 7 --output .artifacts/benchmarks/cuda-irregular.json
 ```
 
-La primera compilación, preparación y transferencias se separan de ejecución
-residente. Ridge compara veinte pasos comunes, no tiempo hasta convergencia.
-No se consideran los tiempos de esta primera implementación como el techo CUDA.
+First compilation, preparation, and transfers are separated from resident
+execution. Ridge compares twenty common steps, not time to convergence.
+Timings of this initial implementation are not considered the CUDA ceiling.

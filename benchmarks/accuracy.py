@@ -359,11 +359,11 @@ def run(
 
 def write_table(report, output):
     lines = [
-        "# Error numérico y tiempo",
+        "# Numerical error and timing",
         "",
-        "Referencias Decimal80 sobre los inputs realmente representados. Casos pequeños de diagnóstico; los tiempos no representan el rendimiento a escala. El error relativo de los solvers es error hacia la solución del sistema redondeado. Las excepciones y los casos fuera del umbral se conservan.",
+        "Decimal80 references for the inputs actually represented. Small diagnostic cases; timings do not represent performance at scale. Solver relative error measures forward error against the solution of the rounded system. Exceptions and cases outside the threshold are preserved.",
         "",
-        "| Caso / método / dtype | Implementación | ms | Error abs. máx | Error L2 relativo | Residuo relativo Decimal | Error hacia atrás | Estado |",
+        "| Case / method / dtype | Implementation | ms | Max abs. error | Relative L2 error | Decimal relative residual | Backward error | Status |",
         "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |",
     ]
 
@@ -391,7 +391,7 @@ def write_table(report, output):
                     fmt(solver.get("backward_error")),
                     row.get(
                         "error",
-                        "fuera del umbral diagnóstico" if row.get("quality_finding") else "ok",
+                        "outside diagnostic threshold" if row.get("quality_finding") else "ok",
                     ).replace("|", "/"),
                 ]
             )

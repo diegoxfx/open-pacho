@@ -1,27 +1,27 @@
-# Ejecución, fusión y CLBlast
+# Execution, fusion and CLBlast
 
-La [ronda de tres iteraciones del 2026-09-24](three-iterations-results.md) incorpora
-tiles rectangulares sin copias en OpenCL/CUDA, selección de primitivas vectoriales
-cuBLAS y flags de transposición privada al compilar con CLBlast. Incluye controles
-de la ruta anterior, dos rondas, transferencias y errores numéricos. Las cifras
-de etapas anteriores son snapshots; en particular, la ventaja histórica de
-padding no se transfiere automáticamente al GEMM directo más rápido.
+The [three-iteration round of 2026-09-24](three-iterations-results.md) adds
+rectangular tiles without copies on OpenCL/CUDA, selection of cuBLAS vector
+primitives and private-transpose flags when compiling with CLBlast. It includes controls
+for the previous path, two rounds, transfers and numerical errors. Figures
+from earlier stages are snapshots; in particular, the historical padding
+advantage does not automatically transfer to the faster direct GEMM.
 
-El usuario elige el backend y el dispositivo. OpenPacho no cambia automáticamente
-entre CPU y GPU ni mueve un array para decidir dónde ejecutar una operación.
-Los backends implementados son `numpy`, `opencl`, `vulkan` y [CUDA inicial](cuda.md). La presencia de una GPU no implica que soporte cualquier backend.
+The user chooses the backend and device. OpenPacho does not automatically switch
+between CPU and GPU or move an array to decide where to execute an operation.
+Implemented backends are `numpy`, `opencl`, `vulkan` and [initial CUDA](cuda.md). Having a GPU does not imply support for every backend.
 
-Para código nuevo repetido se recomienda [`@pacho.compile`](compilation.md):
-evita retrazar la función en cada llamada y admite reducciones, álgebra y varias
-salidas. `fuse` se conserva como captura acotada por llamada. OpenCL y Vulkan
-fusionan expresiones elemento a elemento y las integran con su reducción cuando
-el intermedio no se devuelve ni tiene varios consumidores; CUDA aplica el mismo
-esquema a los grupos elementwise/map-reduce admitidos.
+For new repeated code, [`@pacho.compile`](compilation.md) is recommended:
+it avoids retracing the function on every call and supports reductions, algebra and multiple
+outputs. `fuse` remains as limited per-call capture. OpenCL and Vulkan
+fuse elementwise expressions and integrate them with their reduction when
+the intermediate is neither returned nor has multiple consumers; CUDA applies the same
+scheme to supported elementwise/map-reduce groups.
 
-El [análisis de gaps y optimización](gaps-and-optimization.md) distingue los costes
-medidos y las oportunidades pendientes, sin presuponer paridad entre backends.
+The [gap and optimization analysis](gaps-and-optimization.md) distinguishes measured
+costs and remaining opportunities without assuming parity between backends.
 
-## Fusión explícita
+## Explicit fusion
 
 ```python
 import numpy as np
@@ -29,179 +29,179 @@ import openpacho as pacho
 
 
 @pacho.fuse
-def actualizar(x, b, tasa=0.01):
-    return (1 - tasa) * x + tasa * b
+def update(x, b, rate=0.01):
+    return (1 - rate) * x + rate * b
 
 
 with pacho.use_backend("opencl"):
     x = pacho.asarray(np.ones(10000, dtype=np.float32))
     b = pacho.asarray(np.zeros(10000, dtype=np.float32))
     for _ in range(100):
-        x = actualizar(x, b)
-    resultado = pacho.asnumpy(x)
+        x = update(x, b)
+    result = pacho.asnumpy(x)
 ```
 
-Cada llamada a `actualizar` ejecuta un kernel elemento a elemento y crea un único
-buffer de salida. Los intermedios se calculan dentro del kernel. Los escalares se
-pasan por valor, sin buffers ni transferencias de arrays escalares. El bucle de
-Python sigue ejecutando 100 llamadas: esta versión no fusiona el bucle completo.
+Each call to `update` runs one elementwise kernel and creates a single
+output buffer. Intermediates are computed inside the kernel. Scalars are
+passed by value, without buffers or transfers of scalar arrays. The Python loop
+still executes 100 calls: this version does not fuse the whole loop.
 
-Se admiten las ufuncs elemento a elemento ya soportadas, broadcasting, constantes
-y argumentos escalares, y un único resultado. No se admiten reducciones, `@`,
-indexación, escritura, conversión a host o condiciones Python que dependan de
-los datos trazados. La función debe ser pura: su cuerpo Python se ejecuta en cada
-llamada. Los argumentos array deben ser OpenPacho; la conversión desde NumPy se
-hace explícitamente antes de llamar. No se captura Python arbitrario.
+Already supported elementwise ufuncs, broadcasting, constants
+and scalar arguments, and a single result are supported. Reductions, `@`,
+indexing, writes, host conversion or Python conditions depending on
+traced data are unsupported. The function must be pure: its Python body executes on every
+call. Array arguments must be OpenPacho; conversion from NumPy is
+performed explicitly before calling. Arbitrary Python is not captured.
 
-La resolución de tipos y las conversiones intermedias siguen NumPy 2; no se activa
-fast-math. La contracción automática de operaciones flotantes está deshabilitada
-en los kernels fusionados. Esto no garantiza igualdad bit a bit en funciones
-trascendentes. El backend NumPy evalúa el mismo grafo sin generar código nativo.
-Los programas OpenCL, módulos NVRTC CUDA y pipelines Vulkan se almacenan en cachés
-limitadas a 128 variantes por backend; formas, tipos y expresión determinan la
-variante, los valores escalares no. En Vulkan, los límites de descriptores y push
-constants del dispositivo siguen acotando el tamaño de una expresión fusionada.
+Type resolution and intermediate conversions follow NumPy 2; fast-math is not
+enabled. Automatic floating-point contraction is disabled
+in fused kernels. This does not guarantee bitwise equality for transcendental
+functions. The NumPy backend evaluates the same graph without generating native code.
+OpenCL programs, CUDA NVRTC modules and Vulkan pipelines are stored in caches
+limited to 128 variants per backend; shapes, types and expression determine the
+variant, scalar values do not. On Vulkan, device descriptor and push-constant limits
+still bound fused expression size.
 
-Con `compile`, un cálculo como `np.sum((a - b) * (a - b), axis=1)` puede ejecutar
-map-reduce en OpenCL, Vulkan y CUDA sin materializar todo el array transformado. Las
-reducciones grandes conservan parciales en dispositivo y necesitan una etapa posterior.
-En CUDA, `CUDALowering` compila los grupos admitidos con NVRTC; matmul y BLAS
-conservan su frontera de proveedor. Consulta los [resultados de fusión CUDA](cuda-fusion-results.md).
-Una expresión compartida por consumidores distintos o devuelta como salida conserva su
-materialización; no se promete que cualquier grafo se convierta en un único kernel.
+With `compile`, a computation such as `np.sum((a - b) * (a - b), axis=1)` can run
+map-reduce on OpenCL, Vulkan and CUDA without materializing the whole transformed array. Large
+reductions retain partials on device and need a later stage.
+On CUDA, `CUDALowering` compiles supported groups with NVRTC; matmul and BLAS
+retain their provider boundary. See the [CUDA fusion results](cuda-fusion-results.md).
+An expression shared by different consumers or returned as an output retains its
+materialization; there is no promise that any graph becomes a single kernel.
 
-## Memoria y métodos iterativos
+## Memory and iterative methods
 
-OpenCL reutiliza buffers mediante un `MemoryPool`. Las subidas de host ya contiguo
-evitan una copia intermedia de CPU; la copia hacia GPU termina antes de retornar,
-preservando el aislamiento si el usuario modifica después el input. Los arrays
-no contiguos requieren preparación en host.
+OpenCL reuses buffers through a `MemoryPool`. Uploads of already contiguous host data
+avoid an intermediate CPU copy; the GPU copy completes before returning,
+preserving isolation if the user later modifies the input. Noncontiguous
+arrays require host preparation.
 
-La cola en orden mantiene las dependencias entre operaciones y reutilizaciones.
-El pool retiene memoria libre para llamadas posteriores. Para liberarla:
-`pacho.get_backend("opencl").release_cached_memory()`; esto sincroniza la cola y
-conserva los arrays vivos. Si se usa otra configuración de BLAS, debe llamarse
-sobre ese objeto backend.
+The in-order queue maintains dependencies between operations and reuse.
+The pool retains free memory for later calls. To release it:
+`pacho.get_backend("opencl").release_cached_memory()`; this synchronizes the queue and
+preserves live arrays. If another BLAS configuration is used, it must be called
+on that backend object.
 
-Vulkan reutiliza buffers de dispositivo y staging por tamaño exacto o capacidad
-compatible acotada, con un límite
-conjunto de 128 MiB de asignaciones nativas y 128 buffers libres. Los comandos
-pendientes retienen sus buffers para impedir una reutilización prematura. Los
-comandos y, en la ruta de sets, pools de descriptores completados también se reutilizan, con un máximo
-de 128 recursos de cada tipo. `pacho.get_backend("vulkan").release_cached_memory()`
-espera el trabajo pendiente y libera esas cachés, conservando los arrays vivos.
-Las llamadas compiladas agrupan dispatches en un command buffer, con cortes por
-sincronización o por 64 operaciones grabadas/pendientes; eager conserva envío por
-operación. Se usan push descriptors cuando la capacidad y el número de bindings
-lo permiten; los demás grupos reutilizan descriptor sets completados. Se prefiere
-readback coherente con caché CPU. Se conservan plantillas de dispatch y estructuras
-nativas de descriptores, barreras y envío. Los registros host de push se reutilizan
-tras grabarlos; los buffers GPU se retienen hasta terminar su uso.
-Ver [mediciones actuales](backend-sharing-results.md).
-Esto no elimina la grabación de comandos ni el coste de muchas llamadas Python.
+Vulkan reuses device and staging buffers by exact size or bounded compatible
+capacity, with a combined limit
+of 128 MiB of native allocations and 128 free buffers. Pending commands
+retain their buffers to prevent premature reuse. Completed commands and,
+on the sets path, descriptor pools are also reused, with at most
+128 resources of each type. `pacho.get_backend("vulkan").release_cached_memory()`
+waits for pending work and frees those caches while preserving live arrays.
+Compiled calls group dispatches in one command buffer, split by
+synchronization or 64 recorded/pending operations; eager retains submission per
+operation. Push descriptors are used when capability and binding count
+permit; other groups reuse completed descriptor sets. Coherent readback
+with CPU caching is preferred. Dispatch templates and native descriptor,
+barrier and submission structures are retained. Host push records are reused
+after recording; GPU buffers are retained until use completes.
+See [current measurements](backend-sharing-results.md).
+This does not remove command recording or the cost of many Python calls.
 
-Los solvers de [examples](../examples/README.md) reutilizan planes compilados para actualizaciones vectoriales;
-OpenCL y Vulkan las fusionan, incluido el patrón privado `b - A @ x` con GEMV
-custom compatible. CG y descenso más pronunciado usan la norma escalada del
-estado residual y direcciones normalizadas, mantienen coeficientes en GPU y descargan comprobaciones
-de validez. Se sigue comprobando el residuo real **en cada iteración**, conservando
-la información de convergencia y fallo. Todavía existen sincronizaciones para las
-decisiones de parada; no son solvers completamente autónomos en dispositivo.
-El orden y precisión de los cálculos de coeficientes puede cambiar ligeramente
-el número de iteraciones frente a la versión anterior.
+The solvers in [examples](../examples/README.md) reuse compiled plans for vector updates;
+OpenCL and Vulkan fuse them, including the private `b - A @ x` pattern with compatible
+custom GEMV. CG and steepest descent use the scaled norm of the residual
+state and normalized directions, keep coefficients on the GPU and download validity
+checks. The true residual is still checked **at every iteration**, preserving
+convergence and failure information. Synchronizations remain for
+stopping decisions; these are not fully autonomous on-device solvers.
+The order and accuracy of coefficient computations may slightly change
+the iteration count compared with the previous version.
 
-Los planes de avance agrupan actualización, residuo y norma; los de curvatura
-agrupan GEMV y DOT (más normalización para descenso más pronunciado). La validación
-host lee directamente la curvatura; evita un kernel booleano adicional y mantiene
-el coeficiente en dispositivo para actualizar con el mismo dtype.
+Advance plans group update, residual and norm; curvature plans
+group GEMV and DOT (plus normalization for steepest descent). Host validation
+reads curvature directly; it avoids an extra boolean kernel and keeps
+the coefficient on device for updating with the same dtype.
 
-Para resolver repetidamente con la misma matriz, existe un contrato explícito:
+For repeated solves with the same matrix, there is an explicit contract:
 
 ```python
-from examples import solvers  # requiere el repositorio, no viene en el wheel
+from examples import solvers  # requires the repository; not included in the wheel
 
-sistema = solvers.prepare(A, method="cg")  # también "jacobi" o "sd"
-primero = sistema.solve(b1, rtol=1e-5)
-segundo = sistema.solve(b2, rtol=1e-5)
+system = solvers.prepare(A, method="cg")  # also "jacobi" or "sd"
+first = system.solve(b1, rtol=1e-5)
+second = system.solve(b2, rtol=1e-5)
 ```
 
-La preparación copia la matriz y valida su forma y finitud una vez; Jacobi también
-guarda la diagonal validada. Las modificaciones posteriores de la matriz original
-no alteran el sistema. Cada resolución valida b/x0, tolerancias y residuo real en
-cada iteración. No se demuestra que la matriz sea SPD ni que Jacobi converja.
-La precisión queda fijada por A (float64 para matrices no flotantes); un b que
-exija promoverla se rechaza. Debe prepararse una matriz convertida explícitamente.
-La copia añade memoria y tiempo de preparación: no se recomienda como aceleración
-de una única resolución. Los pasos compilados de los solvers preparan sus bindings
-una vez por resolución, sin cambiar el contrato público de convergencia.
+Preparation copies the matrix and validates its shape and finiteness once; Jacobi also
+stores the validated diagonal. Later changes to the original matrix
+do not alter the system. Each solve validates b/x0, tolerances and the true residual at
+every iteration. It does not prove that the matrix is SPD or that Jacobi converges.
+Accuracy is fixed by A (float64 for nonfloating matrices); a b requiring
+promotion is rejected. An explicitly converted matrix must be prepared.
+The copy adds memory and preparation time: it is not recommended as acceleration
+for a single solve. Compiled solver steps prepare their bindings
+once per solve without changing the public convergence contract.
 
-## BLAS opcional, kernels propios conservados
+## Optional BLAS, custom kernels retained
 
 ```python
 with pacho.use_backend(
-    "opencl", device="0:0", blas="clblast", clblast_library="/ruta/a/la/biblioteca/CLBlast"
+    "opencl", device="0:0", blas="clblast", clblast_library="/path/to/CLBlast/library"
 ):
     A = pacho.asarray(np.eye(64, dtype=np.float32))
     y = A @ A
 ```
 
-`clblast_library` es la ruta del binario nativo apropiado para el sistema (`.dll`,
-`.so` o `.dylib`); también puede configurarse con `OPENPACHO_CLBLAST_LIBRARY`.
-Sin ruta explícita se intenta encontrar la biblioteca instalada. CLBlast se
-distribuye por separado: `pip install open-pacho[opencl]` no instala ese binario.
+`clblast_library` is the path to the appropriate native binary for the system (`.dll`,
+`.so` or `.dylib`); it can also be configured with `OPENPACHO_CLBLAST_LIBRARY`.
+Without an explicit path, discovery of the installed library is attempted. CLBlast is
+distributed separately: `pip install open-pacho[opencl]` does not install that binary.
 
-`blas="custom"` es la opción predeterminada y permite comparar los kernels propios.
-`blas="clblast"` delega los productos flotantes admitidos: DOT/GEMV nativos para
-operaciones vectoriales de rango 1/2 cuando la biblioteca expone sus símbolos y
-GEMM para los demás casos. Si faltan los símbolos opcionales, permanece el camino
-GEMM. `matmul` por lotes usa GEMM strided-batched nativo para offsets regulares,
-o GEMM batched con arrays de offsets para broadcasting irregular, cuando están
-disponibles. Los offsets apuntan a los buffers originales; no se duplican inputs
-broadcast. Si faltan esos símbolos, conserva el bucle de GEMM del mismo proveedor.
-Un error de ejecución nativa se propaga y no activa ese camino alternativo.
-Los productos enteros y
-las dimensiones vacías se resuelven en OpenPacho. Una biblioteca ausente o un
-error de ejecución producen un error explícito; no provocan un cambio oculto de
-motor. Configuraciones diferentes tienen contextos distintos; se elige la
-configuración antes de crear los arrays.
+`blas="custom"` is the default option and allows comparison of custom kernels.
+`blas="clblast"` delegates supported floating-point products: native DOT/GEMV for
+rank 1/2 vector operations when the library exposes their symbols, and
+GEMM for other cases. If optional symbols are missing, the GEMM path remains.
+Batched `matmul` uses native strided-batched GEMM for regular offsets,
+or batched GEMM with offset arrays for irregular broadcasting, when
+available. Offsets point to original buffers; broadcast inputs
+are not duplicated. If those symbols are missing, the same provider's GEMM loop remains.
+A native execution error propagates and does not activate that alternative path.
+Integer products and
+empty dimensions are handled by OpenPacho. A missing library or execution
+error produces an explicit error; it does not cause a hidden engine
+switch. Different configurations have different contexts; choose the
+configuration before creating arrays.
 
-Los kernels OpenCL propios cooperan entre work-items para GEMV con vector derecho
-y DOT grandes. OpenCL y Vulkan usan una nueva ruta GEMM float32 para M/N≥32,
-K≥16 y capacidad suficiente: cada grupo calcula 32×32 salidas y cada hilo guarda
-4×4 acumuladores en registros, con 4 KiB de memoria compartida. Incluye broadcasting
-por lotes y bordes. OpenCL conserva tiles locales de 16×16/8×8 o el kernel simple
-para otros casos. En la ruta de registros, OpenCL elimina guardas cuando M/N son
-múltiplos de 32 y K de 16; ver [control y resultados](kernel-stability-results.md).
-Los casos parciales conservan las guardas con la configuración predeterminada.
-El [padding opcional](padding.md) alinea GEMM custom float32 en OpenCL, Vulkan y
-CUDA a cambio de buffers y copias; los tiempos públicos incluyen todo ese coste.
-La [reevaluación](padding-reassessment.md) encuentra ganancias en algunas formas
-rectangulares OpenCL/CUDA y pérdidas en la mayoría; se mantiene desactivado por
-defecto, sin selección automática ni recomendación general para Vulkan.
-Vulkan conserva su ruta de 8×8 para los casos no elegibles.
-GEMM permite contracción
-multiplicación-suma; la fusión elementwise conserva sus redondeos. Vulkan también
-usa reducciones/GEMV cooperativos y parciales para DOT largo. Ver la
-[investigación de CLBlast y controles de registros](clblast-techniques.md).
-Falta medir y ajustar otras formas, tamaños y fabricantes.
+Custom OpenCL kernels cooperate across work-items for GEMV with a right vector
+and large DOT. OpenCL and Vulkan use a new float32 GEMM path for M/N≥32,
+K≥16 and sufficient capability: each group computes 32×32 outputs and each thread holds
+4×4 accumulators in registers, with 4 KiB of shared memory. It includes batch
+broadcasting and edges. OpenCL retains local 16×16/8×8 tiles or the simple kernel
+for other cases. In the register path, OpenCL removes guards when M/N are
+multiples of 32 and K of 16; see [control and results](kernel-stability-results.md).
+Partial cases retain guards with the default configuration.
+[Optional padding](padding.md) aligns custom float32 GEMM on OpenCL, Vulkan and
+CUDA in exchange for buffers and copies; public times include that entire cost.
+The [reassessment](padding-reassessment.md) finds gains in some rectangular
+OpenCL/CUDA shapes and losses in most; it remains disabled by
+default, with no automatic selection or general recommendation for Vulkan.
+Vulkan retains its 8×8 path for ineligible cases.
+GEMM allows multiply-add
+contraction; elementwise fusion preserves its roundings. Vulkan also
+uses cooperative reductions/GEMV and partials for long DOT. See the
+[CLBlast investigation and register controls](clblast-techniques.md).
+Other shapes, sizes and vendors still need measurement and tuning.
 
-La integración se limita a un adaptador de operaciones BLAS sobre buffers OpenCL.
-Las expresiones, asignaciones y reducciones siguen bajo control de
-OpenPacho. Una llamada BLAS es una frontera de fusión: no podemos insertar una
-actualización arbitraria dentro de su kernel. Para operaciones donde esa frontera
-cueste demasiado, se pueden desarrollar kernels propios y compararlos con CLBlast
-sin cambiar la API pública de arrays. No se presupone qué implementación gana por
-tamaño o dispositivo; no hay selección automática ni ajuste por hardware todavía.
+Integration is limited to an adapter of BLAS operations over OpenCL buffers.
+Expressions, allocations and reductions remain under OpenPacho's
+control. A BLAS call is a fusion boundary: we cannot insert an arbitrary
+update into its kernel. For operations where that boundary
+costs too much, custom kernels can be developed and compared against CLBlast
+without changing the public array API. Which implementation wins by
+size or device is not assumed; there is no automatic selection or hardware tuning yet.
 
-Fuentes de las interfaces utilizadas:
-[MemoryPool de PyOpenCL](https://documen.tician.de/pyopencl/tools.html),
+Sources for the interfaces used:
+[PyOpenCL MemoryPool](https://documen.tician.de/pyopencl/tools.html),
 [CLBlast](https://github.com/CNugteren/CLBlast).
 
-Las matrices dispersas y los precondicionadores quedan como deuda futura.
+Sparse matrices and preconditioners remain future work.
 
-## Diagnóstico de dispatch Vulkan
+## Vulkan dispatch diagnostics
 
-La [ronda de frontera CFFI](vulkan-dispatch-results.md) compara el binding generado
-con comandos tipados del mismo backend. Se conservan conteos y resultados;
-los tiempos GPU instrumentados y de pared se publican separados. Las mediciones
-no atribuyen automáticamente el tiempo restante a Python ni a un límite físico.
+The [CFFI boundary round](vulkan-dispatch-results.md) compares the generated binding
+with typed commands from the same backend. Counts and results are preserved;
+instrumented GPU times and wall times are published separately. Measurements
+do not automatically attribute the remaining time to Python or to a physical limit.

@@ -1,90 +1,89 @@
-# Primera etapa de optimización — 2026-09-06
+# First optimization stage — 2026-09-06
 
-Se implementaron fusión elemento a elemento, pool de memoria OpenCL, escalares
-por valor, actualizaciones fusionadas de solvers y un adaptador opcional CLBlast.
-La elección de backend sigue siendo explícita. La API y sus límites están en
+Elementwise fusion, an OpenCL memory pool, by-value scalars,
+fused solver updates, and an optional CLBlast adapter were implemented.
+Backend selection remains explicit. The API and its limits are in
 [performance.md](performance.md).
 
-## Comparación final
+## Final comparison
 
-26 configuraciones, 390 series y 7 rondas por serie, sin errores de ejecución o
-validación numérica. Se midieron en la misma sesión NumPy con BLAS de 1/8/16 hilos,
-el wheel anterior sin modificar y la versión actual. Se eligió el menor tiempo
-mediano de NumPy por caso. Equipo: Ryzen 7 5700X3D y RTX 5060 Ti, Windows;
-CLBlast 1.7.0, NumPy 2.5.3 y PyOpenCL 2026.1.4. Solo se validó esta GPU.
+26 configurations, 390 series, and 7 rounds per series, with no execution or
+numerical validation errors. NumPy with 1/8/16 BLAS threads,
+the previous unmodified wheel, and the current version were measured in the same session.
+The lowest median NumPy time was selected per case. Hardware: Ryzen 7 5700X3D and RTX 5060 Ti, Windows;
+CLBlast 1.7.0, NumPy 2.5.3, and PyOpenCL 2026.1.4. Only this GPU was validated.
 
-Medianas en **milisegundos con subida, cálculo y descarga**, runtime caliente,
-entradas y validación fuera del reloj. El NumPy CPU recibe/devuelve datos de host
-y no carga con una copia artificial. Cada llamada se sincroniza. No se afirma
-significación estadística de diferencias pequeñas a partir de estas medianas.
+Medians in **milliseconds including upload, computation, and download**, warm runtime,
+with inputs and validation outside the timer. CPU NumPy receives/returns host data
+and is not burdened with an artificial copy. Every call synchronizes. These medians
+alone do not establish statistical significance for small differences.
 
-| Caso | NumPy | OpenPacho anterior | Actual custom | Actual fusionado | Actual CLBlast |
+| Case | NumPy | Previous OpenPacho | Current custom | Current fused | Current CLBlast |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 100 actualizaciones, 1.048.576 elementos, float32 | 197.50 | 231.58 | 34.08 | **26.18** | — |
-| 100 actualizaciones, 1.048.576 elementos, float64 | 378.19 | 258.35 | 35.43 | **28.20** | — |
-| sin/exp/cos, 1.048.576 elementos, float32 | 7.66 | 9.16 | 2.95 | **2.68** | — |
+| 100 updates, 1,048,576 elements, float32 | 197.50 | 231.58 | 34.08 | **26.18** | — |
+| 100 updates, 1,048,576 elements, float64 | 378.19 | 258.35 | 35.43 | **28.20** | — |
+| sin/exp/cos, 1,048,576 elements, float32 | 7.66 | 9.16 | 2.95 | **2.68** | — |
 | Matmul 2048², float32 | 30.45 | 36.64 | 24.38 | — | **11.17** |
 | Matmul 2048², float64 | 63.15 | 86.27 | 61.60 | — | 60.78 |
 | Jacobi 4096 variables, float64 | 138.71 | 166.72 | **95.10** | — | 97.16 |
 | Jacobi 1024 variables, float32 | **3.12** | 32.27 | 27.01 | — | 29.01 |
 | CG 1024 variables, float32 | **2.47** | 22.08 | 24.22 | — | 24.80 |
 
-En las expresiones genéricas, `custom` ya incluye memoria reutilizable y escalares
-por valor. `fusionado` agrega `@fuse`. En los solvers, tanto `custom` como `CLBlast`
-ya usan las actualizaciones fusionadas. CLBlast cambia los productos flotantes.
+For generic expressions, `custom` already includes reusable memory and by-value
+scalars. `fused` adds `@fuse`. For solvers, both `custom` and `CLBlast`
+already use fused updates. CLBlast changes floating-point products.
 
-## Lo que aporta y lo que queda pendiente
+## Contributions and remaining work
 
-- La secuencia float32 fusionada es aproximadamente **7,54× más rápida que NumPy**
-  y **8,85× que el wheel anterior** en este ensayo. El paso de 231,58 a 34,08 ms
-  corresponde al conjunto de mejoras de ejecución; la fusión aporta el paso de
-  34,08 a 26,18 ms. No se aislaron pool y escalares entre sí.
-- CLBlast ofrece **2,73× sobre NumPy** en matmul 2048² float32. La diferencia
-  pequeña en float64 no debe interpretarse como una ventaja consolidada.
-- CLBlast no gana siempre al kernel propio. El adaptador inicial usa GEMM también
-  para vectores. GEMV/DOT dedicados y kernels que combinen producto/actualización
-  siguen siendo oportunidades de trabajo.
-- Los solvers pequeños siguen perdiendo. CG de 1024 variables incluso empeora
-  frente al wheel anterior. El trazado y las comprobaciones son candidatos a
-  perfilar; este ensayo no aísla la causa de esa regresión.
-- Los solvers se compararon con recurrencias equivalentes y criterios de residuo
-  real, en matrices SPD tridiagonales **almacenadas y procesadas densas**. Esto no
-  compara contra un solver disperso especializado ni cubre todos los problemas.
-- Se usa la precisión solicitada, sin bajar de float64 a float32, y se conserva
-  la comprobación del residuo en cada iteración. El redondeo de coeficientes en
-  dispositivo puede alterar las iteraciones; se valida convergencia y solución.
-- El decorador traza Python en cada llamada y fusiona una expresión, no un bucle
-  completo. No cubre reducciones ni matmul. El backend NumPy no compila ese grafo.
+- The fused float32 sequence is approximately **7.54× faster than NumPy**
+  and **8.85× faster than the previous wheel** in this experiment. The change from 231.58 to 34.08 ms
+  corresponds to the combined execution improvements; fusion provides the change
+  from 34.08 to 26.18 ms. Pool and scalar effects were not isolated from each other.
+- CLBlast provides **2.73× over NumPy** for 2048² float32 matmul. The
+  small float64 difference should not be interpreted as an established advantage.
+- CLBlast does not always beat the custom kernel. The initial adapter also uses GEMM
+  for vectors. Dedicated GEMV/DOT and kernels combining products/updates
+  remain opportunities for further work.
+- Small solvers still lose. CG with 1024 variables even regresses
+  against the previous wheel. Tracing and checks are profiling candidates;
+  this experiment does not isolate the cause of that regression.
+- Solvers were compared using equivalent recurrences and true-residual criteria,
+  on SPD tridiagonal matrices **stored and processed densely**. This does not
+  compare against a specialized sparse solver or cover every problem.
+- The requested precision is used, without reducing float64 to float32, and
+  residual checks are retained at every iteration. Rounding coefficients on
+  the device can alter iteration counts; convergence and the solution are validated.
+- The decorator traces Python on every call and fuses an expression, not a complete
+  loop. It covers neither reductions nor matmul. The NumPy backend does not compile that graph.
 
-## Evidencia y reproducción
+## Evidence and reproduction
 
-El informe completo local
-(`.artifacts/benchmarks/optimization-final-2026-09-06/REPORT.md`, no distribuido)
-incluye todos los casos y enlaza muestras, tiempos residentes y validaciones.
-Los hashes del runtime permanecieron iguales durante la ejecución final. Se
-guardaron snapshots del runner y la suite, y el wheel anterior permanece en
+The complete local report
+(`.artifacts/benchmarks/optimization-final-2026-09-06/REPORT.md`, not distributed)
+includes every case and links samples, resident timings, and validations.
+Runtime hashes remained unchanged during the final run. Snapshots
+of the runner and suite were saved, and the previous wheel remains in
 `.artifacts/benchmarks/baseline-0.1.0a1.whl`.
 
-Los ensayos exploratorios previos se conservaron por separado: seis configuraciones
-de matmul tuvieron inicialmente un error de construcción de dimensiones del
-benchmark, corregido antes de la ejecución final. También se corrigió una
-desactivación demasiado amplia de FP_CONTRACT: ahora solo se deshabilita en
-expresiones fusionadas. Las cifras anteriores proceden exclusivamente de la
-ejecución final completa, con cero errores.
+Earlier exploratory experiments were retained separately: six matmul configurations
+initially had a benchmark dimension-construction error,
+corrected before the final run. An overly broad disabling of FP_CONTRACT was also
+corrected: it is now disabled only for fused expressions. The figures above come
+exclusively from the complete final run, with zero errors.
 
-Comando: `python -m benchmarks.optimization --output NUEVA_CARPETA --clblast
---legacy-wheel .artifacts/benchmarks/baseline-0.1.0a1.whl --rounds 7`, con
-`OPENPACHO_CLBLAST_LIBRARY` apuntando al binario nativo. Véase
+Command: `python -m benchmarks.optimization --output NEW_DIRECTORY --clblast
+--legacy-wheel .artifacts/benchmarks/baseline-0.1.0a1.whl --rounds 7`, with
+`OPENPACHO_CLBLAST_LIBRARY` pointing to the native binary. See
 [benchmarks/README.md](../benchmarks/README.md).
 
-Verificación de la implementación: 207 pruebas correctas y 1 omitida en la suite
-con CPU/OpenCL; la variante CLBlast también pasó la suite completa antes del
-ajuste de FP_CONTRACT (que afecta solo los kernels propios). El adaptador además
-dispone de pruebas del ABI simulado y 10 casos de producto nativo. La revisión
-adicional de broadcasting, vida útil de buffers y residencia no encontró nuevas
-regresiones de corrección. El wheel instalado en el entorno CPU independiente
-pasó 102 pruebas, con 99 omisiones de casos que requieren GPU/CLBlast.
-Las conversiones flotante→entero fuera de rango siguen
-siendo una limitación anterior documentada.
+Implementation verification: 207 tests passed and 1 skipped in the
+CPU/OpenCL suite; the CLBlast variant also passed the complete suite before the
+FP_CONTRACT adjustment (which affects only custom kernels). The adapter also
+has mock-ABI tests and 10 native product cases. Additional review of
+broadcasting, buffer lifetimes, and residency found no new correctness
+regressions. The wheel installed in the independent CPU environment
+passed 102 tests, with 99 skips for cases requiring GPU/CLBlast.
+Out-of-range floating-point-to-integer conversions remain
+an earlier documented limitation.
 
-Matrices dispersas y precondicionadores quedan como deuda futura.
+Sparse matrices and preconditioners remain future debt.

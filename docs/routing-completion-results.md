@@ -1,213 +1,216 @@
-# Routing por implementación y finalización Vulkan — 2026-09-13
+# Implementation routing and Vulkan completion — 2026-09-13
 
-Se adopta dispatch mediante métodos del backend y factorías resueltas al preparar
-planes. Se elimina el retorno del RNG a un selector central por nombre, se cachean
-sus plantillas completas y Vulkan pasa a esperar una fence reutilizable. También
-se corrige un fallo real de reentrada de finalizadores en su pool.
+Dispatch through backend methods and factories resolved during plan preparation
+is adopted. RNG no longer returns to a central name-based selector, its complete
+templates are cached, and Vulkan now waits on a reusable fence. A real finalizer
+reentrancy failure in its pool is also fixed.
 
-## Decisión arquitectónica
+## Architectural decision
 
-La preocupación por `if backend == ...` es válida cuando cada operación común
-necesita conocer todas las implementaciones. En RNG existía un recorrido redundante:
-fachada → método del backend → helper común que volvía a preguntar por el backend.
-El coste relevante no era comparar tres strings: OpenCL repetía sustituciones de
-casts y otras APIs reconstruían envoltorios de fuente en cada llamada.
+The concern about `if backend == ...` is valid when every common operation needs
+to know all implementations. RNG had a redundant path: facade → backend method
+→ common helper that asked about the backend again. The relevant cost was not
+comparing three strings: OpenCL repeated cast substitutions and other APIs rebuilt
+source wrappers on every call.
 
-Ahora la propiedad está definida así:
+Ownership is now defined as follows:
 
 ```mermaid
 flowchart LR
-    F[API random: validación y contadores] --> B[backend.random_data]
-    B --> A[Adaptador propio: fuente y lanzamiento]
-    A --> S[Philox compartido: aritmética y escalares]
-    A --> G[Runtime GPU opcional]
-    C[compile: preparación] --> L[backend.create_lowering]
-    L --> P[Plan: lowerer y execution_scope enlazados]
+    F[random API: validation and counters] --> B[backend.random_data]
+    B --> A[Own adapter: source and launch]
+    A --> S[Shared Philox: arithmetic and scalars]
+    A --> G[Optional GPU runtime]
+    C[compile: preparation] --> L[backend.create_lowering]
+    L --> P[Plan: bound lowerer and execution_scope]
 ```
 
-- `random.py` conserva parámetros, rangos, capacidades por distribución/dtype,
-  reservas de contadores y exclusión de captura. Cada backend importa su adaptador
-  directamente. `_random.py` recibe fragmentos de dialecto como datos inmutables;
-  no conoce nombres, colas ni clases GPU. NumPy usa directamente su referencia.
-- Las LRU de fuente tienen límite 128 y claves inmutables. OpenCL/Vulkan reutilizan
-  el cuerpo por dtype/distribución; CUDA incluye count porque lo incrusta en su
-  fuente. Semilla, contador, límites, escala y salida se reenlazan siempre. No se
-  retienen arrays ni se cambia el stream Philox.
-- El plan consulta una vez la factoría opcional `create_lowering()` y enlaza
-  `execution_scope()`. OpenCL/Vulkan proporcionan lowerer; CUDA/NumPy siguen con
-  primitivas. Una factoría que falla propaga el error; su ausencia no cambia de
-  dispositivo. El ámbito es un contexto nuevo por ejecución, con cleanup ante errores.
-- Selección pública por nombre, validaciones de dtype/forma y decisiones por
-  capacidades siguen siendo necesarias. Esta iteración no convierte clases
-  arbitrarias en plugins públicos ni elimina todas las condiciones del proyecto.
-  `_gemm.py`, `_gemv.py`, `_norm.py` y parte del tratamiento de escalares conservan
-  deuda de routing. Se migrarán al ampliar esas operaciones, con controles propios.
+- `random.py` retains parameters, ranges, per-distribution/dtype capabilities,
+  counter reservations, and capture exclusion. Each backend imports its adapter
+  directly. `_random.py` receives dialect fragments as immutable data; it knows
+  no GPU names, queues, or classes. NumPy uses its reference directly.
+- Source LRUs have a 128-entry limit and immutable keys. OpenCL/Vulkan reuse the
+  body by dtype/distribution; CUDA includes count because it embeds it in source.
+  Seed, counter, bounds, scale, and output are always rebound. Arrays are not
+  retained and the Philox stream is unchanged.
+- The plan queries the optional `create_lowering()` factory once and binds
+  `execution_scope()`. OpenCL/Vulkan provide a lowerer; CUDA/NumPy continue with
+  primitives. A failing factory propagates the error; its absence does not switch
+  devices. The scope is a fresh context per execution, with cleanup on errors.
+- Public name-based selection, dtype/shape validation, and capability decisions
+  remain necessary. This iteration neither turns arbitrary classes into public
+  plugins nor removes every project condition. `_gemm.py`, `_gemv.py`, `_norm.py`,
+  and part of scalar handling retain routing debt. They will migrate as those
+  operations expand, with their own controls.
 
-| Alternativa | Decisión |
+| Alternative | Decision |
 | --- | --- |
-| Selector central en cada operación | Evitar cuando duplica dispatch y obliga a editar código común por cada backend |
-| Métodos y factorías del backend | Adoptar: llamadas directas, propiedad clara, preparación fuera del bucle |
-| Registro global, singledispatch o plugins automáticos | No introducir: el backend ya identifica la implementación; añadirían otra resolución |
-| IR completo de lenguajes de kernels | Posponer: excede el problema; conservar aritmética compartida y adaptadores pequeños |
+| Central selector in every operation | Avoid when it duplicates dispatch and requires editing common code for each backend |
+| Backend methods and factories | Adopt: direct calls, clear ownership, preparation outside the loop |
+| Global registry, singledispatch, or automatic plugins | Do not introduce: the backend already identifies the implementation; these would add another resolution |
+| Complete kernel-language IR | Defer: exceeds the problem; retain shared arithmetic and small adapters |
 
-No cambia la API NumPy, eager/compile/fuse, los extras independientes ni la elección
-explícita de hardware/proveedor. No se agregan trucos a solvers o comparadores.
+The NumPy API, eager/compile/fuse, independent extras, and explicit hardware/provider
+selection are unchanged. No tricks are added to solvers or comparators.
 
-## Vulkan: sincronización y pool
+## Vulkan: synchronization and pool
 
-`synchronize()` envía primero los comandos grabados. Si no hay pendientes, retorna
-sin espera nativa. Si hay trabajo, envía un marcador vacío con una fence del contexto,
-espera su señal, la resetea y solo entonces recicla comandos/descriptores/leases.
-No se crea una fence por operación ni se agrupan menos controles de convergencia.
-La ruta privada `queue` conserva `vkQueueWaitIdle` para comparaciones.
+`synchronize()` first submits recorded commands. With nothing pending it returns
+without a native wait. With work pending, it submits an empty marker with a
+context fence, waits for its signal, resets it, and only then recycles commands,
+descriptors, and leases. No fence is created per operation, and convergence
+checks are not grouped less frequently. The private `queue` path retains
+`vkQueueWaitIdle` for comparisons.
 
-El alcance del marcador incluye comandos anteriores de la cola propia, según
-la [especificación de señalización de fences](https://docs.vulkan.org/spec/latest/chapters/synchronization.html#synchronization-fences-signaling).
-Esperar una fence no sustituye la visibilidad de memoria al host: se conservan
-barreras de dependencias y readback. Los resultados de
+The marker's scope includes preceding commands in the dedicated queue, according
+to the [fence signaling specification](https://docs.vulkan.org/spec/latest/chapters/synchronization.html#synchronization-fences-signaling).
+Waiting on a fence does not replace host memory visibility: dependency and
+readback barriers are retained. Results of
 [`vkWaitForFences`](https://docs.vulkan.org/refpages/latest/refpages/source/vkWaitForFences.html)
-se comprueban también por la tabla CFFI. Ante fallo de submit/wait/reset, la
-instancia retiene referencias y rechaza nuevos envíos; no reintenta ni recicla
-recursos inciertos. Su cierre también puede propagar el fallo: recuperar un
-dispositivo perdido sigue siendo trabajo futuro.
+are also checked through the CFFI table. On submit/wait/reset failure, the instance
+retains references and rejects new submissions; it neither retries nor recycles
+uncertain resources. Closing it can also propagate the failure: lost-device
+recovery remains future work.
 
-El primer control prolongado falló con `OrderedDict mutated during iteration`.
-Un finalizador puede devolver o expulsar buffers mientras una asignación Python
-dispara GC, incluso teniendo el RLock en el mismo hilo. La búsqueda usa ahora una
-instantánea de claves y revalida la capacidad escogida. La liberación separa el pool
-actual antes de recorrerlo. Las regresiones CPU simulan tanto devolución como
-expulsión durante el recorrido y comprueban contabilidad y ausencia de doble liberación.
-Es un bug de gestión Python, sin evidencia de dependencia de fabricante.
+The first prolonged control failed with `OrderedDict mutated during iteration`.
+A finalizer can return or evict buffers while a Python allocation triggers GC,
+even with the RLock held in the same thread. Lookup now uses a key snapshot and
+revalidates the chosen capacity. Release detaches the current pool before
+iterating over it. CPU regressions simulate both returns and evictions during
+iteration and check accounting and absence of double frees. This is a Python
+management bug, with no evidence of vendor dependence.
 
-## Método de medición
+## Measurement method
 
-Windows / RTX 5060 Ti / NVIDIA 616.64 / Python 3.12. Procesos secuenciales por
-backend, reposo observado al menos 10 s y techo 52 °C antes de cada proceso,
-warmup mínimo 0,25 s por modo y 31 muestras. Se guardan muestras, p10/p90,
-telemetría, fuentes y referencia histórica. El reposo no garantiza régimen térmico
-sostenido ni elimina la variación de CPU/driver/WDDM.
+Windows / RTX 5060 Ti / NVIDIA 616.64 / Python 3.12. Sequential processes per
+backend, observed idle conditions for at least 10 s and a 52 °C ceiling before
+each process, minimum 0.25 s warm-up per mode, and 31 samples. Samples, p10/p90,
+telemetry, sources, and historical reference are saved. Idling does not guarantee
+a sustained thermal regime or eliminate CPU/driver/WDDM variation.
 
-El control Vulkan compara tres rutas en el mismo dispositivo/contexto: método
-`synchronize` del wheel anterior, espera de cola omitiendo vacíos y fence. Los
-kernels, el pool corregido y la planificación son comunes. Dos rondas con semillas
-941/942 más una confirmación con 117: **144 configuraciones**, con tiempos
-residentes y, cuando procede, completos. Las mediciones instrumentadas son separadas:
-no se interpreta pared menos timestamps GPU como «tiempo puro de Python».
+The Vulkan control compares three paths on the same device/context: the previous
+wheel's `synchronize` method, queue waiting that skips empty work, and a fence.
+Kernels, the corrected pool, and scheduling are common. Two rounds with seeds
+941/942 plus confirmation with 117: **144 configurations**, with resident and,
+where applicable, full timings. Instrumented measurements are separate: wall
+time minus GPU timestamps is not interpreted as “pure Python time.”
 
-El control RNG cambia solo el método `random_data` en el mismo backend y conserva
-los kernels/sincronización. Usa la ruta Vulkan de cola en ambos brazos, previa a
-promover la fence; sus ganancias no deben sumarse a las de finalización. Dos rondas
-OpenCL/Vulkan/CUDA custom, float32/64 y tamaños 33, 257×129, 1025×1023:
-**264 configuraciones válidas y 12 exclusiones por capacidad**. Cada par verifica
-igualdad exacta de outputs, además de error frente a Philox/NumPy y momentos.
+The RNG control changes only `random_data` on the same backend and preserves
+kernels/synchronization. It uses the Vulkan queue path in both arms, before
+promoting the fence; its gains must not be added to completion gains. Two rounds
+of OpenCL/Vulkan/custom CUDA, float32/64, and sizes 33, 257×129, 1025×1023:
+**264 valid configurations and 12 capability exclusions**. Each pair checks exact
+output equality as well as error against Philox/NumPy and moments.
 
-## Resultados Vulkan
+## Vulkan results
 
-Microsegundos residentes; cada celda muestra las tres medianas por orden de ronda.
-El archivo CSV adjunto al artefacto conserva todos los casos, tiempos completos y
-dispersión. Los controles incluyen asignación; las descargas entregan datos al host.
+Resident microseconds; each cell shows the three medians in round order.
+The CSV attached to the artifact retains all cases, full timings, and dispersion.
+Controls include allocation; downloads deliver data to the host.
 
-| Caso | Anterior | Cola sin vacíos | Fence adoptada |
+| Case | Previous | Queue skipping empty work | Adopted fence |
 | --- | ---: | ---: | ---: |
-| Suma 33, float32 | 197 / 183 / 199 | 197 / 198 / 199 | 182 / 165 / 176 |
-| Descargar 1, float32 | 151 / 146 / 156 | 135 / 130 / 133 | 125 / 107 / 126 |
-| Descargar 1.048.576, float32 | 1.379 / 1.357 / 1.390 | 1.346 / 1.334 / 1.358 | 1.342 / 1.320 / 1.333 |
-| Energía 2049×33, float32 | 235 / 203 / 287 | 229 / 201 / 213 | 201 / 177 / 190 |
-| Covarianza 1025×65, float32 | 436 / 403 / 421 | 414 / 398 / 430 | 399 / 393 / 408 |
-| CG 129, float32 | 11.866 / 10.723 / 11.084 | 12.505 / 10.569 / 11.977 | 11.093 / 10.334 / 10.521 |
-| Descenso 129, float32 | 22.167 / 19.795 / 20.245 | 21.685 / 20.495 / 22.404 | 19.537 / 18.235 / 20.267 |
-| CG 129, float64 | 18.512 / 19.566 / 19.621 | 20.065 / 19.736 / 19.766 | 17.964 / 20.398 / 18.938 |
-| Descenso 129, float64 | 44.330 / 39.351 / 39.754 | 46.763 / 40.629 / 42.453 | 37.058 / 37.135 / 42.352 |
+| Sum 33, float32 | 197 / 183 / 199 | 197 / 198 / 199 | 182 / 165 / 176 |
+| Download 1, float32 | 151 / 146 / 156 | 135 / 130 / 133 | 125 / 107 / 126 |
+| Download 1,048,576, float32 | 1,379 / 1,357 / 1,390 | 1,346 / 1,334 / 1,358 | 1,342 / 1,320 / 1,333 |
+| Energy 2049×33, float32 | 235 / 203 / 287 | 229 / 201 / 213 | 201 / 177 / 190 |
+| Covariance 1025×65, float32 | 436 / 403 / 421 | 414 / 398 / 430 | 399 / 393 / 408 |
+| CG 129, float32 | 11,866 / 10,723 / 11,084 | 12,505 / 10,569 / 11,977 | 11,093 / 10,334 / 10,521 |
+| Descent 129, float32 | 22,167 / 19,795 / 20,245 | 21,685 / 20,495 / 22,404 | 19,537 / 18,235 / 20,267 |
+| CG 129, float64 | 18,512 / 19,566 / 19,621 | 20,065 / 19,736 / 19,766 | 17,964 / 20,398 / 18,938 |
+| Descent 129, float64 | 44,330 / 39,351 / 39,754 | 46,763 / 40,629 / 42,453 | 37,058 / 37,135 / 42,352 |
 
-La suma corta mejora aproximadamente 7–11 % frente a la espera anterior, sin
-cambiar su kernel. Una llamada explícita sobre cola vacía, más la sincronización
-del medidor, baja de 20–26 µs a 0,7–1,4 µs: elimina trabajo redundante, no acelera
-cálculo GPU. Las copias grandes cambian poco. CG float64 empeora en una ronda y
-descenso float64 en la confirmación frente al método histórico. También hay
-regresiones completas, por ejemplo suma float64 444→553 µs en la primera ronda
-y covarianza float64 741→794 µs en la segunda. Se conservan en el CSV.
+The short sum improves approximately 7–11% over the previous wait without changing
+its kernel. An explicit call on an empty queue, plus the timer's synchronization,
+drops from 20–26 µs to 0.7–1.4 µs: it removes redundant work rather than speeding
+up GPU computation. Large copies change little. Float64 CG worsens in one round
+and float64 descent in confirmation against the historical method. There are
+also full-time regressions, for example float64 sum 444→553 µs in round one and
+float64 covariance 741→794 µs in round two. They are retained in the CSV.
 
-Se adopta la fence por mejoras repetidas en las operaciones cortas y resultados
-mayoritariamente favorables frente a la alternativa de cola sin vacíos. No se
-afirma mejora universal ni haber alcanzado un límite físico. La diferencia entre
-las dos llamadas nativas puede depender de implementación del driver; estas cifras
-no separan ese efecto de scheduling del host ni prueban otros fabricantes.
+The fence is adopted for repeated improvements in short operations and mostly
+favorable results against the queue alternative that skips empty work. No
+universal improvement or achieved physical limit is claimed. The difference
+between the two native calls may depend on driver implementation; these numbers
+do not separate that effect from host scheduling or prove results on other vendors.
 
-## Resultados de routing RNG
+## RNG routing results
 
-El control CPU sustituye asignación y lanzamiento por stubs, para aislar preparación
-del adaptador; 11 muestras de 2.000 llamadas float32. No mide latencia pública ni GPU.
+The CPU control replaces allocation and launch with stubs to isolate adapter
+preparation; 11 samples of 2,000 float32 calls. It measures neither public latency
+nor GPU time.
 
-| Backend | Preparación anterior, µs | Adaptador cacheado, µs |
+| Backend | Previous preparation, µs | Cached adapter, µs |
 | --- | ---: | ---: |
-| OpenCL, rango de cuatro distribuciones | 15,5–20,1 | 3,1–3,8 |
-| Vulkan | 13,1–14,0 | 10,4–11,2 |
-| CUDA | 3,9–4,6 | 3,1–3,9 |
+| OpenCL, range across four distributions | 15.5–20.1 | 3.1–3.8 |
+| Vulkan | 13.1–14.0 | 10.4–11.2 |
+| CUDA | 3.9–4.6 | 3.1–3.9 |
 
-Los barridos públicos tienen resultados mixtos. Un caso repetido fue random(33)
-OpenCL float32: 194→244 µs y 194→233 µs. Se investigó con **21 bloques alternados
-de 11 muestras por modo**, aleatorizando su orden, en procesos adicionales con
-reposo observado. El mismo caso dio **221→213 µs**; float64 **203→179 µs**.
-CUDA dio **134→128 µs** y **103→103 µs**. Los resultados originales se conservan:
-la regresión inicial no se reprodujo bajo esa alternancia, pero no se demuestra
-que toda diferencia sea ruido ni que desaparezcan todas las regresiones.
+Public sweeps have mixed results. One repeated case was OpenCL float32 random(33):
+194→244 µs and 194→233 µs. It was investigated with **21 alternating blocks of
+11 samples per mode**, randomizing their order, in additional processes with
+observed idle conditions. The same case gave **221→213 µs**; float64
+**203→179 µs**. CUDA gave **134→128 µs** and **103→103 µs**. Original results are
+retained: the initial regression was not reproduced with that alternation, but
+this does not prove that every difference is noise or every regression disappears.
 
-La decisión se apoya en propiedad de implementación más clara, preparación más
-barata y equivalencia numérica. No se presenta como una victoria general de
-rendimiento GPU. En CUDA la reducción de host es menor que 1 µs en este control;
-el despacho y trabajo nativo siguen dominando.
+The decision rests on clearer implementation ownership, cheaper preparation,
+and numerical equivalence. It is not presented as a general GPU performance win.
+In CUDA, the host reduction is less than 1 µs in this control; dispatch and native
+work still dominate.
 
-## Error y semántica
+## Error and semantics
 
-Los pares RNG producen exactamente la misma secuencia antes/después. Frente a
-la transformación NumPy de la misma precisión, el máximo error absoluto fue
-2,75e-6 y el relativo L2 3,33e-7; no es una referencia de precisión superior para
-float32 comparado con float32. Uniformes, no finitos y momentos se validan por caso.
+RNG pairs produce exactly the same before/after sequence. Against the same-precision
+NumPy transform, maximum absolute error was 2.75e-6 and relative L2 error 3.33e-7;
+this is not a higher-precision reference for float32 versus float32. Uniforms,
+nonfinites, and moments are validated per case.
 
-En solvers no cambiaron tolerancias, frecuencia de chequeo, algoritmo ni iteraciones:
+Solver tolerances, checking frequency, algorithm, and iterations did not change:
 
-| Aplicación | Iteraciones | Norma de residuo real / límite | Error relativo de solución |
+| Application | Iterations | True residual norm / limit | Relative solution error |
 | --- | ---: | ---: | ---: |
-| CG float32 | 13 | 6,331e-4 / 8,970e-4 | 1,746e-4 |
-| Descenso float32 | 29 | 8,554e-4 / 8,970e-4 | 3,780e-4 |
-| CG float64 | 23 | 5,025e-7 / 8,970e-7 | 1,390e-7 |
-| Descenso float64 | 59 | 7,819e-7 / 8,970e-7 | 3,519e-7 |
+| CG float32 | 13 | 6.331e-4 / 8.970e-4 | 1.746e-4 |
+| Descent float32 | 29 | 8.554e-4 / 8.970e-4 | 3.780e-4 |
+| CG float64 | 23 | 5.025e-7 / 8.970e-7 | 1.390e-7 |
+| Descent float64 | 59 | 7.819e-7 / 8.970e-7 | 3.519e-7 |
 
-Los residuales se recalculan en CPU float64. El error de solución se compara con
-`numpy.linalg.solve` float64, no con un oráculo de precisión arbitraria. El criterio
-de parada controla residuo, por lo que el error relativo de solución puede exceder rtol.
-Los tiempos y errores de suma/energía/covarianza también se conservan por caso.
+Residuals are recalculated on CPU in float64. Solution error is compared with
+float64 `numpy.linalg.solve`, not an arbitrary-precision oracle. The stopping
+criterion controls residual, so relative solution error can exceed rtol.
+Sum/energy/covariance timings and errors are also retained per case.
 
-## Artefactos y reproducción
+## Artifacts and reproduction
 
-Artefactos locales: `.artifacts/routing-completion/`. `before.whl` es el wheel de
-la ronda staging/RNG; se guarda el SHA de cada módulo de control. `completion-control`
-es la tanda fallida y se excluye. `completion-control-v2` y `completion-confirmation`
-contienen las rondas válidas. `corrected-completion` rectifica solo metadatos de
-referencia de idle/download del primer control, conservando original/SHA: tiempos
-y errores no cambian. `completion-summary.csv` y `routing-summary.csv` contienen
-todas las filas y dispersión; `summary.txt` permite inspección rápida.
+Local artifacts: `.artifacts/routing-completion/`. `before.whl` is the wheel from
+the staging/RNG round; the SHA of each control module is saved.
+`completion-control` is the failed batch and is excluded. `completion-control-v2`
+and `completion-confirmation` contain valid rounds. `corrected-completion`
+corrects only idle/download reference metadata from the first control, retaining
+the original/SHA: timings and errors do not change. `completion-summary.csv` and
+`routing-summary.csv` contain all rows and dispersion; `summary.txt` supports
+quick inspection.
 
 ```powershell
-# Configurar glslang, runtimes y la ruta del wheel histórico local previamente.
+# Configure glslang, runtimes, and the local historical wheel path beforehand.
 python -m benchmarks.isolated --worker completion --backends vulkan --rounds 2 --repeats 31 --max-temperature 52 --control-wheel PATH_TO_WHEEL --output NEW_COMPLETION_DIR
 python -m benchmarks.isolated --worker routing --backends opencl,vulkan,cuda-custom --rounds 2 --repeats 31 --max-temperature 52 --control-wheel PATH_TO_WHEEL --output NEW_ROUTING_DIR
 python -m benchmarks.routing_host --control-wheel PATH_TO_WHEEL --output NEW_HOST_JSON
 ```
 
-Los workers de control ejecutan explícitamente el módulo del wheel local confiable;
-no descargan código. El script adicional `interleaved.py` queda en el artefacto con
-sus JSON para reproducir el diagnóstico específico. La verificación final de
-tests, empaquetado y dependencias figura en [verification.md](verification.md).
+Control workers explicitly execute the trusted local wheel module; they do not
+download code. The additional `interleaved.py` script remains in the artifact
+with its JSON files to reproduce the specific diagnosis. Final verification of
+tests, packaging, and dependencies is in [verification.md](verification.md).
 
-## Siguiente margen útil
+## Next useful improvements
 
-1. Fusionar envío y marcador de finalización cuando el trabajo aún no se ha enviado,
-   sin añadir fences por dispatch. Perfilar el grabador nativo solo si la preparación
-   Python restante lo justifica.
-2. Continuar transpuestas lógicas/flags, GEMV/DOT y kernels custom, con controles
-   por forma/dtype y precisión; el routing se migra al tocar cada operación.
-3. Modelar capacidades de operación y futura fusión CUDA sobre las factorías ya
-   disponibles. No se necesita un framework general de plugins para el paso siguiente.
-4. Ampliar RNG solo como P2: enteros sin sesgo, streams/spawn y baterías estadísticas
-   extensas. Su aritmética y los efectos con estado siguen fuera de compile.
+1. Fuse submission and completion marker when work has not yet been submitted,
+   without adding fences per dispatch. Profile the native recorder only if
+   remaining Python preparation justifies it.
+2. Continue logical transposes/flags, GEMV/DOT, and custom kernels with controls
+   by shape/dtype and precision; migrate routing when touching each operation.
+3. Model operation capabilities and future CUDA fusion on the factories already
+   available. A general plugin framework is unnecessary for the next step.
+4. Expand RNG only as P2: unbiased integers, streams/spawn, and extensive
+   statistical suites. Its arithmetic and stateful effects remain outside compile.

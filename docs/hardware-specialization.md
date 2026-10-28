@@ -1,99 +1,98 @@
-# Especialización por capacidades y track de hardware
+# Capability-based specialization and the hardware track
 
-Este documento fija reglas para especialización por dispositivo y sistema
-operativo. La línea principal sigue siendo portable. Las variantes implementadas
-se distinguen de los futuros perfiles por familia y autotuning.
+This document sets rules for device and operating-system specialization.
+The main track remains portable. Implemented variants are distinguished from
+future family-specific profiles and autotuning.
 
-## Variantes implementadas — 2026-09-13
+## Implemented variants — 2026-09-13
 
-- Vulkan detecta extensiones en instancia/dispositivo, habilita properties2 y
-  push_descriptor cuando están disponibles y comprueba maxPushDescriptors.
-  Dentro del límite usa push descriptors; fuera, descriptor sets. La selección
-  no usa el nombre NVIDIA ni cambia shaders, barreras o precisión. La alternativa
-  portátil se conserva y se prueba en el mismo equipo.
-- CUDA comprueba el límite de hilos y memoria compartida antes de usar el GEMM
-  float32 tiled compartido con OpenCL/Vulkan. NVRTC compila para la capacidad de
-  cómputo del dispositivo. No activa TF32, fast-math ni contracción FMA nueva.
-- OpenCL usa índices int32 para elementwise/gather cuando una cota conservadora
-  demuestra que caben los accesos, con ruta int64. Es una especialización por
-  forma/layout, no por fabricante ni por precisión de los datos.
+- Vulkan detects instance/device extensions, enables properties2 and
+  push_descriptor when available, and checks maxPushDescriptors.
+  Within the limit it uses push descriptors; beyond it, descriptor sets.
+  Selection does not use the NVIDIA name or change shaders, barriers, or
+  precision. The portable alternative is retained and tested on the same machine.
+- CUDA checks thread and shared-memory limits before using the tiled float32
+  GEMM shared with OpenCL/Vulkan. NVRTC compiles for the device's compute
+  capability. It does not enable TF32, fast-math, or new FMA contraction.
+- OpenCL uses int32 indices for elementwise/gather when a conservative bound
+  proves accesses fit, with an int64 path available. This is specialization by
+  shape/layout, not by vendor or data precision.
 
-Las macros pueden expresar una variante dentro de un kernel, pero no sustituyen
-la consulta/habilitación de capacidades ni la selección de llamadas host. Las
-cachés de programas son locales al backend/dispositivo; las cachés compartidas
-guardan solo texto/metadatos. Futuras instrucciones de subgrupo, FMA o productos
-matriciales especiales deberán declarar sus requisitos y semántica numérica antes
-de entrar al selector. Que una instrucción sea más rápida no demuestra equivalencia
-de redondeo, acumulación o tratamiento de subnormales.
+Macros can express a variant within a kernel, but do not replace capability
+queries/enabling or host-call selection. Program caches are local to the
+backend/device; shared caches store only text/metadata. Future subgroup
+instructions, FMA, or special matrix products must declare their requirements
+and numerical semantics before entering the selector. A faster instruction does
+not establish equivalent rounding, accumulation, or subnormal handling.
 
-Ver [implementación y mediciones](backend-sharing-results.md). Los perfiles por
-familia/SO y autotuning siguen como track secundario.
+See [implementation and measurements](backend-sharing-results.md). Profiles by
+family/OS and autotuning remain a secondary track.
 
-## Orden de trabajo
+## Work order
 
-El track principal conserva este orden:
+The main track keeps this order:
 
-1. Ejecución Vulkan: bajar el coste de ejecución y staging; reutilizar
-   descriptores y agrupar envíos (batching).
-2. GEMV y map-reduce, con mediciones residentes y aplicaciones externas
-   (solvers de `examples/`, con criterios de convergencia explícitos).
-3. Un ejecutor preparado que reutilice planes, memoria y metadatos sin ocultar
-   validaciones ni sincronizaciones.
-4. BLAS batched y kernels custom donde las mediciones justifiquen cruzar una
-   frontera de proveedor.
+1. Vulkan execution: reduce execution and staging costs; reuse descriptors
+   and batch submissions.
+2. GEMV and map-reduce, with resident measurements and external applications
+   (solvers in `examples/`, with explicit convergence criteria).
+3. A prepared executor that reuses plans, memory, and metadata without hiding
+   validation or synchronization.
+4. Batched BLAS and custom kernels where measurements justify crossing a
+   provider boundary.
 
-Hardware y sistema operativo son un track de menor prioridad y no deben frenar
-la [línea principal vigente](roadmap.md).
+Hardware and operating systems are a lower-priority track and must not hold
+back the [current main track](roadmap.md).
 
-## Reglas de selección
+## Selection rules
 
-- Comprobar capacidades reales primero: límites de workgroup, memoria local,
-  tipos y extensiones. No inferirlas por el nombre de la familia del dispositivo.
-- Si falta una capacidad y existe una ruta portable válida, usarla dentro del
-  mismo backend y contrato numérico. Si no existe, dar un error explícito.
-  Nunca cambiar de backend implícitamente.
-- La elección de proveedor, como BLAS frente a kernel propio, debe ser explícita,
-  observable y reversible.
-- Separar tuning opcional (tiles, subgrupos o estrategias específicas del SO)
-  de workarounds necesarios para corrección. Batching, pooling y fusión portables
-  pertenecen a la línea principal. Acotar un workaround a un hardware requiere
-  evidencia de su alcance; con causa desconocida se conserva la protección
-  general. No cambiar dtype, tolerancias o frecuencia de comprobación.
+- Check actual capabilities first: workgroup limits, local memory, types, and
+  extensions. Do not infer them from the device family name.
+- If a capability is missing and a valid portable path exists, use it within
+  the same backend and numerical contract. Otherwise, raise an explicit error.
+  Never switch backends implicitly.
+- Provider selection, such as BLAS versus a custom kernel, must be explicit,
+  observable, and reversible.
+- Separate optional tuning (tiles, subgroups, or OS-specific strategies) from
+  workarounds required for correctness. Portable batching, pooling, and fusion
+  belong to the main track. Restricting a workaround to hardware requires
+  evidence of its scope; when the cause is unknown, retain general protection.
+  Do not change dtype, tolerances, or checking frequency.
 
-## Límite de la evidencia de hardware
+## Limits of the hardware evidence
 
-RTX50 es una familia candidata para repetir pruebas, no una conclusión de
-portabilidad. La evidencia local disponible se limita a RTX 5060 Ti, Windows 11
-y driver 616.64. PCIe Gen3 ×8 describe la configuración del host y del enlace
-observado; no es una propiedad de la familia RTX50. No se atribuye un bug a un
-hardware concreto sin una reproducción comparada que lo aísle.
+RTX50 is a candidate family for repeating tests, not a portability conclusion.
+Available local evidence is limited to RTX 5060 Ti, Windows 11, and driver 616.64.
+PCIe Gen3 ×8 describes the host configuration and observed link; it is not a
+property of the RTX50 family. A bug is not attributed to specific hardware
+without a comparative reproduction that isolates it.
 
-## Casos numéricos que deben permanecer separados
+## Numerical cases that must remain separate
 
-- El subdesbordamiento de la norma con `A=eye(2)`,
-  `b=[1e-30,-1e-30]` float32 y `rtol=atol=0` es un caso general de rango
-  numérico. Se verificó en tres backends locales: la suma de cuadrados float32
-  dio cero, mientras la comprobación float64 dio aproximadamente `1.414e-30`.
-  No se presenta como un fallo específico de GPU.
-- CLBlast 1.7.0 produjo NaN en GEMV con `beta=0` cuando el destino reciclado
-  contenía NaN/Inf; se reprodujo en NVIDIA sobre Windows. El alcance causal
-  sigue desconocido: no se extiende la observación a toda GPU, driver, BLAS o
-  versión. El adaptador ya aplica un relleno preventivo general, con pruebas:
-  no se restringirá a NVIDIA mientras falte evidencia para hacerlo con seguridad.
+- Norm underflow with `A=eye(2)`, `b=[1e-30,-1e-30]` float32, and `rtol=atol=0`
+  is a general numerical-range case. It was verified on three local backends:
+  the float32 sum of squares returned zero, while the float64 check returned
+  approximately `1.414e-30`. It is not presented as a GPU-specific failure.
+- CLBlast 1.7.0 produced NaN in GEMV with `beta=0` when the recycled destination
+  contained NaN/Inf; this was reproduced on NVIDIA under Windows. The causal
+  scope remains unknown: the observation is not extended to every GPU, driver,
+  BLAS, or version. The adapter already applies a general preventive fill, with
+  tests: it will not be restricted to NVIDIA without evidence that this is safe.
 
-## Criterio para avanzar
+## Advancement criterion
 
-La [ronda de kernels y estabilidad](kernel-stability-results.md) incorpora reposo
-observado, calentamiento uniforme, orden invertido entre procesos y controles de
-variantes. Promueve solo la eliminación de guardas OpenCL para tiles completos;
-padding, layout local y bloques alternativos permanecen experimentales cuando
-no muestran ganancias consistentes. Incluye el criterio de amortización para
-packing/transpuestas globales y el coste de memoria previo a la selección.
+The [kernel and stability round](kernel-stability-results.md) incorporates
+observed idle conditions, uniform warm-up, reversed order between processes, and
+variant controls. It promotes only removal of OpenCL guards for full tiles;
+padding, local layouts, and alternative blocks remain experimental when they
+show no consistent gains. It includes the amortization criterion for global
+packing/transposes and the memory cost before selection.
 
-Una especialización entra en el track principal solo con capacidad detectada,
-fallback del mismo backend, proveedor explícito y comparación reproducible. Los
-resultados deben conservar forma, dtype, tolerancias, residuo e iteraciones;
-medir una mejora de un caso no autoriza una promesa para toda la familia.
+A specialization enters the main track only with detected capabilities, a
+fallback within the same backend, an explicit provider, and a reproducible
+comparison. Results must preserve shape, dtype, tolerances, residual, and
+iterations; measuring an improvement in one case does not authorize a promise
+for the entire family.
 
-Referencias: [gaps y optimización](gaps-and-optimization.md), [backend Vulkan](vulkan.md)
-y [diagnóstico local](../benchmarks/gaps.py).
+References: [gaps and optimization](gaps-and-optimization.md), [Vulkan backend](vulkan.md),
+and [local diagnostics](../benchmarks/gaps.py).

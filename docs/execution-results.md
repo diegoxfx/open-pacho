@@ -1,45 +1,45 @@
-# Compilador, Vulkan y referencias CUDA: resultados locales
+# Compiler, Vulkan, and CUDA references: local results
 
-**Snapshot histórico anterior a las optimizaciones de GEMV, map-reduce y Vulkan.**
-La continuación de las prioridades al final de este documento está en
-[gaps y optimización](gaps-and-optimization.md); los tiempos de esta página se
-conservan como referencia del estado anterior.
-La continuación más reciente está en [map-reduce, preparación y BLAS batched](remaining-suite-results.md).
+**Historical snapshot before GEMV, map-reduce, and Vulkan optimizations.**
+The continuation of the priorities at the end of this document is in
+[gaps and optimization](gaps-and-optimization.md); this page's timings
+are retained as a reference for the previous state.
+The most recent continuation is in [map-reduce, preparation, and batched BLAS](remaining-suite-results.md).
 
-Plataforma: Windows-11-10.0.26200-SP0. Dispositivos: {'opencl': 'NVIDIA GeForce RTX 5060 Ti', 'opencl-clblast': 'NVIDIA GeForce RTX 5060 Ti', 'vulkan': 'NVIDIA GeForce RTX 5060 Ti'}. La sesión original del 2026-09-06 corresponde a Windows 11, RTX 5060 Ti 16 GB (driver 616.64), Ryzen 7 5700X3D y 32 GB RAM. No se ha validado AMD/Intel.
+Platform: Windows-11-10.0.26200-SP0. Devices: {'opencl': 'NVIDIA GeForce RTX 5060 Ti', 'opencl-clblast': 'NVIDIA GeForce RTX 5060 Ti', 'vulkan': 'NVIDIA GeForce RTX 5060 Ti'}. The original session from 2026-09-06 used Windows 11, RTX 5060 Ti 16 GB (driver 616.64), Ryzen 7 5700X3D, and 32 GB RAM. AMD/Intel have not been validated.
 
-**235 configuraciones, siete rondas por modo, cero errores de validación.** 172 de operaciones/pasos y 63 de solvers completos. Los JSON conservan todas las muestras; el CSV añade cuartiles.
+**235 configurations, seven rounds per mode, zero validation errors.** 172 operation/step configurations and 63 complete-solver configurations. JSON files retain all samples; CSV adds quartiles.
 
-## Qué cambia y qué sigue costando
+## What changes and what still costs
 
-100 actualizaciones de 1 048 576 valores float32: 203.974 ms en el mejor NumPy, 33.846 ms en OpenCL directo, 11.280 ms con compile y 6.187 ms en CuPy. Incluyendo transferencias: 209.622 ms NumPy y 13.418 ms OpenCL compilado.
+100 updates of 1,048,576 float32 values: 203.974 ms with the best NumPy, 33.846 ms with direct OpenCL, 11.280 ms with compile, and 6.187 ms with CuPy. Including transfers: 209.622 ms for NumPy and 13.418 ms for compiled OpenCL.
 
-Matmul 2048×2048 float32: 31.670 ms en NumPy, 3.771 ms OpenCL+CLBlast, 1.458 ms cuBLAS y 1.589 ms nvmath. La ventaja principal aquí viene del proveedor matricial: compilar un matmul aislado no lo fusiona ni mejora necesariamente su kernel.
+2048×2048 float32 matmul: 31.670 ms with NumPy, 3.771 ms with OpenCL+CLBlast, 1.458 ms with cuBLAS, and 1.589 ms with nvmath. The main advantage here comes from the matrix provider: compiling an isolated matmul neither fuses it nor necessarily improves its kernel.
 
-Jacobi completo a 2048 float32: 10.402 ms NumPy, 25.121 ms OpenCL custom y 14.658 ms CuPy. Descenso más pronunciado: 13.354 ms NumPy, 34.135 ms OpenCL y 23.711 ms CuPy. Son tiempos residentes: la transferencia no es la única causa de las diferencias. Hay GEMV/DOT, despacho, asignaciones y sincronización para convergencia. CLBlast por sí solo no resuelve el algoritmo.
+Complete Jacobi at 2048 float32: 10.402 ms for NumPy, 25.121 ms for OpenCL custom, and 14.658 ms for CuPy. Steepest descent: 13.354 ms for NumPy, 34.135 ms for OpenCL, and 23.711 ms for CuPy. These are resident times: transfer is not the only cause of differences. GEMV/DOT, dispatch, allocations, and synchronization for convergence are involved. CLBlast alone does not resolve the algorithm.
 
-Vulkan: matmul 2048 float32 residente 20.447 ms, con transferencias 108.242 ms; 100 actualizaciones grandes, 303.090 ms. Es funcional; faltan pool, fusión y menor coste de envío. Estos números no representan un límite de Vulkan como tecnología.
+Vulkan: resident 2048 float32 matmul 20.447 ms, with transfers 108.242 ms; 100 large updates, 303.090 ms. It is functional; pooling, fusion, and lower submission costs are still needed. These numbers do not represent a limit of Vulkan as a technology.
 
-100 actualizaciones de solo 256 valores: 0.301 ms NumPy y 11.023 ms OpenCL compilado. La corrección se conserva; no se prioriza hacer que GPU gane este caso.
+100 updates of only 256 values: 0.301 ms for NumPy and 11.023 ms for compiled OpenCL. Correctness is preserved; making the GPU win this case is not a priority.
 
-## Método y límites de comparación
+## Method and comparison limits
 
-- Tiempo de pared sincronizado, con despacho Python y asignación de resultados. Rondas con orden aleatorio de implementaciones. No se usan tiempos de lanzamiento asincrónico como cómputo completo.
-- Residente: inputs ya cargados, planes preparados y kernels calentados. Cada repetición reinicia el estado lógico de las iteraciones. La validación y descarga del resultado quedan fuera de este tiempo.
-- Con transferencias: nuevos buffers de entrada, cómputo y descarga. Se reutilizan planes/programas; nvmath reenlaza operandos sin planificar otra vez. NumPy usa los arrays host existentes: no se le añade una copia artificial.
-- Los JSON separan subida, planificación, primera ejecución y descarga. La primera ejecución es de esa configuración dentro del proceso; puede reutilizar cachés de configuraciones anteriores. No mide un proceso frío independiente ni incluye inicialización del dispositivo. La captura de OpenPacho está incluida en su primera ejecución; la planificación explícita de nvmath figura separada.
-- NumPy se mide con BLAS limitado a 1, 8 y 16 hilos. Las tablas muestran la mejor mediana por caso y modo. Las operaciones sin BLAS no se paralelizan por cambiar ese límite; diferencias pequeñas ahí son ruido.
-- float32/float64 originales, TF32 deshabilitado; nvmath usa COMPUTE_32F/64F. Se comprueban forma, dtype y valores en cada ronda. No se exige identidad bit a bit.
-- `updates100`: x=(1-tasa)*x+tasa*b, cien pasos. `energy`: sum((2*(a*b+c))²,axis=-1), arrays tamaño×32. Jacobi20 y gradient20 usan 20 pasos de una matriz SPD densa dominante; gradient20 usa tasa fija.
-- Los casos `_solve` ejecutan los solvers públicos hasta convergencia, con residuo real en cada iteración, rtol=1e-4/1e-7 para float32/64 y maxiter=400. El descenso más pronunciado usa búsqueda exacta de paso. NumPy/CuPy ejecutan la misma recurrencia mediante operaciones nativas de `benchmarks.suite.native_solver`. Los coeficientes escalares pueden tener rutas/precisión intermedia diferentes. Se valida además el residuo host contra la tolerancia (margen de 2 % por orden de reducción). Los inputs son sistemas tridiagonales almacenados densamente; no es una prueba sparse.
-- CUDA es la plataforma. La referencia concreta cuBLAS usa bindings directos; CuPy matmul también puede usar cuBLAS y nvmath utiliza cuBLASLt. No son tres dispositivos independientes. cuBLAS/nvmath se comparan solo en matmul; no se inventa un solver de alto nivel para esas interfaces.
-- No se midieron PyTorch/JAX, uso máximo de memoria, energía, todas las formas rectangulares ni portabilidad de rendimiento entre fabricantes. Esta batería cubre el alcance actual; no constituye todos los workloads posibles.
+- Synchronized wall time, with Python dispatch and result allocation. Rounds randomize implementation order. Asynchronous launch timings are not used as complete computation time.
+- Resident: inputs already uploaded, plans prepared, and kernels warmed. Each repetition resets the logical iteration state. Validation and result download are outside this time.
+- With transfers: new input buffers, computation, and download. Plans/programs are reused; nvmath rebinds operands without replanning. NumPy uses existing host arrays: no artificial copy is added.
+- JSON files separate upload, planning, first execution, and download. First execution is for that configuration within the process; it may reuse caches from earlier configurations. It does not measure an independent cold process or include device initialization. OpenPacho capture is included in its first execution; explicit nvmath planning is listed separately.
+- NumPy is measured with BLAS limited to 1, 8, and 16 threads. Tables show the best median per case and mode. Operations without BLAS do not become parallel by changing that limit; small differences there are noise.
+- Original float32/float64, TF32 disabled; nvmath uses COMPUTE_32F/64F. Shape, dtype, and values are checked in every round. Bitwise identity is not required.
+- `updates100`: x=(1-rate)*x+rate*b, one hundred steps. `energy`: sum((2*(a*b+c))²,axis=-1), size×32 arrays. Jacobi20 and gradient20 use 20 steps on a dense diagonally dominant SPD matrix; gradient20 uses a fixed rate.
+- `_solve` cases run public solvers to convergence, with true residual at every iteration, rtol=1e-4/1e-7 for float32/64, and maxiter=400. Steepest descent uses exact line search. NumPy/CuPy execute the same recurrence through native operations in `benchmarks.suite.native_solver`. Scalar coefficients may have different paths/intermediate precision. The host residual is also validated against tolerance (2% margin for reduction order). Inputs are densely stored tridiagonal systems; this is not a sparse test.
+- CUDA is the platform. The specific cuBLAS reference uses direct bindings; CuPy matmul can also use cuBLAS, and nvmath uses cuBLASLt. These are not three independent devices. cuBLAS/nvmath are compared only on matmul; no high-level solver is invented for those interfaces.
+- PyTorch/JAX, peak memory usage, energy, all rectangular shapes, and performance portability across vendors were not measured. This battery covers the current scope; it does not encompass every possible workload.
 
-## Tiempos residentes
+## Resident timings
 
-Milisegundos; menor es mejor. OpenPacho usa compile en operaciones/pasos; en `_solve`, el solver público ya compila sus actualizaciones. Los modos eager y compilado completos están en el JSON/CSV.
+Milliseconds; lower is better. OpenPacho uses compile for operations/steps; in `_solve`, the public solver already compiles its updates. Complete eager and compiled modes are in the JSON/CSV.
 
-| Caso / tamaño / dtype | NumPy mejor | OpenCL custom | OpenCL CLBlast | Vulkan | CuPy | cuBLAS | nvmath |
+| Case / size / dtype | Best NumPy | OpenCL custom | OpenCL CLBlast | Vulkan | CuPy | cuBLAS | nvmath |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | matmul / 64 / float32 | 0.029 | 0.234 | 0.241 | 1.058 | 0.333 | 0.316 | 0.520 |
 | matmul / 512 / float32 | 0.943 | 0.494 | 0.342 | 1.302 | 0.349 | 0.343 | 0.450 |
@@ -67,11 +67,11 @@ Milisegundos; menor es mejor. OpenPacho usa compile en operaciones/pasos; en `_s
 | cg_solve / 2048 / float32 | 8.727 | 17.428 | 19.036 | 311.270 | 10.672 | — | — |
 | cg_solve / 1024 / float64 | 6.583 | 29.073 | 31.723 | 530.994 | 20.406 | — | — |
 
-## Carga + cómputo + descarga
+## Upload + computation + download
 
-Milisegundos; planes y programas calientes.
+Milliseconds; warm plans and programs.
 
-| Caso / tamaño / dtype | NumPy mejor | OpenCL custom | OpenCL CLBlast | Vulkan | CuPy | cuBLAS | nvmath |
+| Case / size / dtype | Best NumPy | OpenCL custom | OpenCL CLBlast | Vulkan | CuPy | cuBLAS | nvmath |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | matmul / 64 / float32 | 0.014 | 0.292 | 0.261 | 3.534 | 0.594 | 0.401 | 0.486 |
 | matmul / 512 / float32 | 0.833 | 1.404 | 1.496 | 8.125 | 0.987 | 1.104 | 1.054 |
@@ -99,25 +99,25 @@ Milisegundos; planes y programas calientes.
 | cg_solve / 2048 / float32 | 8.143 | 21.696 | 21.801 | 328.721 | 16.057 | — | — |
 | cg_solve / 1024 / float64 | 6.428 | 30.813 | 32.579 | 544.778 | 19.665 | — | — |
 
-## Prioridad siguiente
+## Next priority
 
-1. Reducir sincronizaciones y coste de ejecución en solvers sin cambiar silenciosamente su frecuencia de comprobación o tolerancias; optimizar GEMV/DOT.
-2. Fusionar map-reduce y mejorar decisiones sobre temporales compartidos. Medir un ejecutor con menor overhead cuando domine Python.
-3. Pool y fusión Vulkan, reutilización de descriptores/comandos y kernels matriciales optimizados. Verificar un segundo fabricante.
-4. Ampliar operaciones frecuentes, como matmul por lotes, según casos reales. Mantener CLBlast y kernels custom intercambiables por contrato; CUDA backend y dispersas siguen como trabajo futuro.
+1. Reduce solver synchronization and execution costs without silently changing check frequency or tolerances; optimize GEMV/DOT.
+2. Fuse map-reduce and improve decisions about shared temporaries. Measure an executor with lower overhead when Python dominates.
+3. Vulkan pooling and fusion, descriptor/command reuse, and optimized matrix kernels. Verify a second vendor.
+4. Extend frequently used operations, such as batched matmul, according to real cases. Keep CLBlast and custom kernels interchangeable by contract; a CUDA backend and sparse operations remain future work.
 
-## Reproducir
+## Reproduce
 
 ```powershell
 $env:PYOPENCL_NO_CACHE='1'
-$env:PACHO_VULKAN_COMPILER='<ruta a glslang o glslc>'
-$env:OPENPACHO_CLBLAST_LIBRARY='<ruta a CLBlast>'
+$env:PACHO_VULKAN_COMPILER='<path to glslang or glslc>'
+$env:OPENPACHO_CLBLAST_LIBRARY='<path to CLBlast>'
 python -m benchmarks.execution --repeats 7 --output .artifacts/benchmarks/execution/raw.json
 python -m benchmarks.execution --solvers-only --repeats 7 --output .artifacts/benchmarks/execution-solvers/raw.json
 python -m benchmarks.execution_report --inputs .artifacts/benchmarks/execution/raw.json .artifacts/benchmarks/execution-solvers/raw.json --output docs/execution-results.md --artifacts .artifacts/benchmarks/execution-report
 ```
 
-Dependencias adicionales: extra benchmark, CuPy y nvmath-python con componentes CUDA compatibles, CLBlast nativo, bindings Vulkan y compilador de shaders. No forman parte de las dependencias mínimas CPU de OpenPacho.
+Additional dependencies: benchmark extra, CuPy and nvmath-python with compatible CUDA components, native CLBlast, Vulkan bindings, and a shader compiler. They are not part of OpenPacho's minimal CPU dependencies.
 
-Versiones medidas: numpy 2.5.3, pyopencl 2026.1.4, vulkan 1.3.275.1, cupy-cuda13x 14.2.0, nvmath-python 1.0.0.
-Los artefactos locales originales están en .artifacts/benchmarks/execution-2026-09-06, .artifacts/benchmarks/execution-solvers-2026-09-06.
+Measured versions: numpy 2.5.3, pyopencl 2026.1.4, vulkan 1.3.275.1, cupy-cuda13x 14.2.0, nvmath-python 1.0.0.
+The original local artifacts are in .artifacts/benchmarks/execution-2026-09-06, .artifacts/benchmarks/execution-solvers-2026-09-06.

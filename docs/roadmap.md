@@ -1,196 +1,196 @@
-# Alcance y prioridades
+# Scope and priorities
 
-OpenPacho es una librería de operaciones matriciales en GPU con API NumPy acotada,
-backend explícito y compilación opcional. Solvers, sistemas preparados y futuras
-aplicaciones de redes/simulación viven en `examples/`, fuera del paquete instalable.
-La versión sigue siendo **0.1.0a1**, sin publicación en PyPI.
+OpenPacho is a library of GPU matrix operations with a limited NumPy API,
+an explicit backend and optional compilation. Solvers, prepared systems and future
+network/simulation applications live in `examples/`, outside the installable package.
+The version remains **0.1.0a1**, with no PyPI publication.
 
-La [dirección arquitectónica acordada](architecture-evolution.md) define contratos,
-precisión y reglas de medición. La [ronda de dispatch Vulkan](vulkan-dispatch-results.md) añade una frontera
-CFFI tipada, un control alternado y diagnóstico con timestamps. Conserva kernels
-y algoritmos. La [ronda entre backends](backend-sharing-results.md) añade push
-descriptors Vulkan por capacidad, caché/índices OpenCL y lotes/tiles CUDA;
-todavía hay margen en preparación/envío y no implica paridad con
-OpenCL/CuPy. La [ronda CUDA inicial](cuda-initial-results.md) conserva su snapshot.
+The [agreed architectural direction](architecture-evolution.md) defines contracts,
+accuracy and measurement rules. The [Vulkan dispatch round](vulkan-dispatch-results.md) adds a typed
+CFFI boundary, an alternating control and timestamp diagnostics. It preserves kernels
+and algorithms. The [cross-backend round](backend-sharing-results.md) adds capability-based Vulkan
+push descriptors, OpenCL caching/indices and CUDA batches/tiles;
+there is still room in preparation/submission and it does not imply parity with
+OpenCL/CuPy. The [initial CUDA round](cuda-initial-results.md) retains its snapshot.
 
-## Línea principal
+## Main line
 
-La [ronda de estabilidad y kernels](kernel-stability-results.md) añade reposo
-observado entre procesos y promueve la especialización de guardas OpenCL en tiles
-completos. El resto de variantes conserva su condición experimental; no cambia
-la prioridad de los gaps de ejecución siguientes.
+The [stability and kernel round](kernel-stability-results.md) adds observed idle time
+between processes and promotes OpenCL guard specialization on full
+tiles. Other variants retain experimental status; the following execution gaps
+retain their priority.
 
-La [ronda de staging y aleatorios](staging-random-results.md) conserva mapeos
-Vulkan solo para readback, después de descartar la persistencia general como
-predeterminada por resultados mixtos. P2 añade un RNG residente. Envíos, esperas
-y agrupación de comandos siguen siendo prioridad principal.
+The [staging and random round](staging-random-results.md) retains Vulkan mappings
+only for readback after rejecting general persistence as the default due to
+mixed results. P2 adds a resident RNG. Submissions, waits
+and command grouping remain the main priority.
 
-La [ronda de routing y finalización](routing-completion-results.md) elimina el
-dispatch duplicado del RNG y resuelve lowering/ámbito de ejecución al preparar
-planes. GEMM/GEMV/normas aún contienen rutas por nombre: su migración será gradual,
-cuando se amplíen o se midan esas operaciones, conservando la aritmética compartida.
+The [routing and completion round](routing-completion-results.md) removes duplicate
+RNG dispatch and resolves lowering/execution scope when preparing
+plans. GEMM/GEMV/norms still contain name-based routes: their migration will be gradual,
+when those operations are extended or measured, preserving shared arithmetic.
 
-La [ronda de fusión CUDA](cuda-fusion-results.md) rota el foco desde esperas Vulkan
-a eliminar lanzamientos y temporales completos en CUDA. Implementa elementwise
-y map-reduce sobre la factoría del backend, sin cambiar los algoritmos de dominio.
+The [CUDA fusion round](cuda-fusion-results.md) shifts focus from Vulkan waits
+to eliminating launches and full temporaries on CUDA. It implements elementwise
+and map-reduce through the backend factory without changing domain algorithms.
 
-La [ronda de preparación de argumentos CUDA](cuda-dispatch-results.md) reutiliza
-almacenamiento host por kernel. El ahorro residente se repite y el empaquetado
-aislado ya cuesta menos de un microsegundo en el control local. La siguiente
-investigación sale de ese subpaso: contexto/envío, binding y operaciones matriciales
-ofrecen más margen pendiente que seguir afinando la misma preparación. La
-[ronda de tres optimizaciones](three-actions-results.md) implementa binding
-posicional común, contexto CUDA anidado con scope selectivo y GEMV/DOT cooperativos
-custom. Conserva mediciones separadas por cambio y reconoce los resultados mixtos.
+The [CUDA argument preparation round](cuda-dispatch-results.md) reuses
+host storage per kernel. Resident savings repeat and isolated packing
+already costs less than a microsecond in the local control. The next
+investigation moves beyond that substep: context/submission, binding and matrix operations
+offer more remaining room than further tuning the same preparation. The
+[three-optimization round](three-actions-results.md) implements shared positional
+binding, nested CUDA context with selective scope and cooperative custom GEMV/DOT.
+It retains measurements separated by change and acknowledges mixed results.
 
-El orden siguiente es un conjunto de frentes, no una preferencia permanente por
-una API. Para elegir iteración se considera frecuencia de uso, coste eliminable,
-ganancia completa/residente, repetibilidad, precisión y esfuerzo. Si un ajuste solo
-da mejoras pequeñas o mixtas en varias rondas, se prioriza otro con mayor ahorro
-posible. Ese ajuste queda pendiente; no significa que el backend agotó su margen.
-Las regresiones de corrección conservan prioridad sobre el rendimiento.
+The following order is a set of areas, not a permanent preference for
+an API. Iteration selection considers usage frequency, removable cost,
+complete/resident gain, repeatability, accuracy and effort. If an adjustment gives only
+small or mixed improvements across several rounds, another with greater potential
+savings takes priority. The adjustment remains pending; it does not mean the backend
+has exhausted its opportunities. Correctness regressions retain priority over performance.
 
-La [inspección de kernels](kernel-inspection-results.md) elimina conversiones
-float64 accidentales en GEMM OpenCL. Las siguientes variantes deben partir de
-esa base corregida: no extrapolar la antigua ventaja del padding. La preparación
-de copias ya ofrece ahorros marginales; priorizar eliminar temporales/envíos y
-mejorar aritmética/layouts antes de seguir afinando esas cachés.
+[Kernel inspection](kernel-inspection-results.md) removes accidental
+float64 conversions in OpenCL GEMM. Subsequent variants must start from
+that corrected baseline: do not extrapolate the old padding advantage. Copy preparation
+already offers marginal savings; prioritize eliminating temporaries/submissions and
+improving arithmetic/layouts before further tuning those caches.
 
-La [reevaluación de padding](padding-reassessment.md) conserva la opción por
-ganancias reproducidas en algunas formas de pocas filas y K largo. La mayoría
-empeora; ampliar padding tiene baja prioridad. Priorizar GEMM rectangular sin
-copias adicionales y estudiar la acumulación CUDA con K largo, donde existen
-elementos fuera de tolerancia tanto con padding como sin él.
+The [padding reassessment](padding-reassessment.md) retains the option for
+reproduced gains on some shapes with few rows and long K. Most
+regress; expanding padding has low priority. Prioritize rectangular GEMM without
+extra copies and study CUDA accumulation with long K, where elements
+fall outside tolerance both with and without padding.
 
-Las [tres iteraciones siguientes](three-iterations-results.md) añaden tiles
-rectangulares sin copias en OpenCL/CUDA, primitivas vectoriales seleccionadas de
-cuBLAS y flags de transposición para temporales privados compilados con CLBlast.
-Los números de padding anteriores son históricos: una ruta directa más rápida
-cambia su punto de equilibrio. No se extrapolan esas ventajas al runtime nuevo.
+The [next three iterations](three-iterations-results.md) add rectangular tiles
+without copies on OpenCL/CUDA, selected cuBLAS vector primitives
+and transpose flags for private temporaries compiled with CLBlast.
+Earlier padding numbers are historical: a faster direct path
+changes its break-even point. Those advantages are not extrapolated to the new runtime.
 
-1. **Ejecución Vulkan y observabilidad:** descomponer preparación Python/CFFI,
-   driver, GPU, copias y esperas. Mejorar comandos/descriptores/staging y memoria
-   según evidencia. Un ejecutor nativo pequeño se evalúa con un control equivalente
-   antes de decidir un adaptador completo.
-2. **Kernels propios competitivos:** GEMM, GEMV, DOT, reducciones y composiciones
-   frecuentes; objetivo continuo de acercarse o superar CLBlast en una suite
-   representativa. Conservar CLBlast/cuBLAS por contrato y los resultados mixtos.
-   CUDA requiere ampliar la selección medida de primitivas cuBLAS, tiling y reducir
-   preparación/lanzamiento alrededor del lowerer fusionado ya disponible;
-   no se exige paridad inmediata con los backends más avanzados.
-3. **Layouts y planes:** ampliar los flags BLAS ya disponibles para CLBlast; materialización según
-   consumidor, reutilización y memoria. Reducir intermediarios, binding y envíos
-   sin cambiar el código de dominio ni el algoritmo de los comparadores. Medir
-   también trabajo repetido al fusionar operaciones pequeñas con broadcasting grande.
-4. **Contratos internos:** reemplazar gradualmente decisiones por nombre de backend
-   por capacidades de operaciones, layouts y políticas numéricas. Resolver rutas
-   al preparar planes y enlazar llamadas directas para contener el coste de abstracción.
-5. **Aplicaciones y precisión:** ampliar covarianza/ridge con redes densas sencillas
-   y simulaciones; seguir midiendo rectangulares, impares y no potencias de dos.
-   Conservar benchmarks de solvers hasta convergencia como clientes externos.
-   Publicar error, preparación, primera llamada, memoria y tiempo residente/completo.
+1. **Vulkan execution and observability:** decompose Python/CFFI preparation,
+   driver, GPU, copies and waits. Improve commands/descriptors/staging and memory
+   according to evidence. A small native executor is evaluated with an equivalent control
+   before deciding on a complete adapter.
+2. **Competitive custom kernels:** GEMM, GEMV, DOT, reductions and common compositions;
+   a continuing goal of approaching or exceeding CLBlast on a representative
+   suite. Retain CLBlast/cuBLAS by contract and mixed results.
+   CUDA requires expanding measured cuBLAS primitive selection, tiling and reducing
+   preparation/launch around the already available fused lowerer;
+   immediate parity with more advanced backends is not required.
+3. **Layouts and plans:** extend the BLAS flags already available for CLBlast; materialization according to
+   consumer, reuse and memory. Reduce intermediates, binding and submissions
+   without changing domain code or comparator algorithms. Also measure
+   repeated work when fusing small operations with large broadcasting.
+4. **Internal contracts:** gradually replace backend-name decisions
+   with operation capabilities, layouts and numerical policies. Resolve routes
+   when preparing plans and bind direct calls to contain abstraction costs.
+5. **Applications and accuracy:** extend covariance/ridge with simple dense networks
+   and simulations; keep measuring rectangular, odd and non-power-of-two shapes.
+   Retain solver benchmarks to convergence as external clients.
+   Publish error, preparation, first call, memory and resident/complete time.
 
-Estas líneas se priorizan con perfiles; una regresión general comprobada precede
-nuevas optimizaciones. Mejorar el ejecutor no autoriza cambiar tolerancias,
-frecuencia de chequeo ni especializar por nombre de un solver.
+These lines are prioritized using profiles; a verified general regression precedes
+new optimizations. Improving the executor does not authorize changing tolerances,
+check frequency or specializing by a solver's name.
 
-## Tracks secundarios y futuros
+## Secondary and future tracks
 
-- **P2, generación aleatoria:** [primera API residente](random.md) para uniforme,
-  normal y exponencial mediante Philox4x32-10. Pendientes: distribución entera
-  sin sesgo, spawn/checkpoint, baterías estadísticas extensas y aprovechar varias
-  salidas por hilo sin romper el contrato de contadores. No desplaza ejecución
-  Vulkan ni kernels matriciales. Aleatoriedad en compile exige modelar efectos.
+- **P2, random generation:** [first resident API](random.md) for uniform,
+  normal and exponential via Philox4x32-10. Pending: unbiased integer distribution,
+  spawn/checkpoint, extensive statistical batteries and using multiple
+  outputs per thread without breaking the counter contract. It does not displace Vulkan
+  execution or matrix kernels. Randomness in compile requires modeling effects.
 
-- **Autotuning acotado:** opt-in/presupuesto explícito, validación de candidatos,
-  caché invalidable por dispositivo/driver/kernel/shape/layout/dtype/modo matemático.
-  Respetar proveedor explícito y mantener ruta portable sin calibración.
-- **Padding de reducciones:** `mean` puede sumar con ceros y dividir por el tamaño
-  lógico de los ejes reducidos. Medir división separada frente a fusión final;
-  conservar dtype, ejes, vacíos y no finitos. [Pendiente, no implementado](padding.md#extensión-futura-reducciones).
-- **Hardware/SO:** [especialización por familias](hardware-specialization.md) cuando
-  se pueda verificar localmente. Separar optimizaciones opcionales de workarounds
-  necesarios para bugs comprobados; no extrapolar a fabricantes completos.
-- **Políticas matemáticas:** modos rápidos y acumulación más robusta, con garantías
-  por operación, FMA/reasociación/subnormales y precisión reducida explícitos.
-  Participan en las claves de caché y en cada comparación; todavía no hay flags públicos.
-  La [investigación de acumulación GEMM](gemm-accumulation-results.md) conserva
-  variantes por bloques y compensadas como experimentos: mejoran precisión en
-  distintos casos, con costes y límites diferentes. No cambia el valor predeterminado.
-- **Portabilidad comunitaria:** matriz de hardware/driver/SO comprobada. Preparar
-  informes reproducibles; AMD/Intel físicos dependen de equipos adicionales o
-  contribuciones. CI CPU/PoCL y empaquetado siguen siendo verificables por el proyecto.
-- **Interoperabilidad:** compartir almacenamiento entre proveedores/contextos o
-  mover directamente entre APIs tiene baja prioridad. La elección de backend es
-  explícita; no se introducen migraciones automáticas.
-- **Dispersas, vistas mutables y compatibilidad total NumPy:** fuera de esta etapa.
-  Autodiff, solvers como API de biblioteca y frameworks de dominio no son objetivos.
+- **Limited autotuning:** opt-in/explicit budget, candidate validation,
+  cache invalidatable by device/driver/kernel/shape/layout/dtype/math mode.
+  Respect the explicit provider and retain a portable path without calibration.
+- **Reduction padding:** `mean` can sum with zeros and divide by the logical size
+  of reduced axes. Measure separate division versus final fusion;
+  preserve dtype, axes, empty arrays and nonfinite values. [Pending, not implemented](padding.md#future-extension-reductions).
+- **Hardware/OS:** [family specialization](hardware-specialization.md) when
+  locally verifiable. Separate optional optimizations from necessary workarounds
+  for verified bugs; do not extrapolate to whole vendors.
+- **Mathematical policies:** fast modes and more robust accumulation, with per-operation
+  guarantees and explicit FMA/reassociation/subnormal/reduced-precision behavior.
+  They participate in cache keys and every comparison; there are no public flags yet.
+  The [GEMM accumulation investigation](gemm-accumulation-results.md) retains
+  blocked and compensated variants as experiments: they improve accuracy in
+  different cases, with different costs and limits. The default is unchanged.
+- **Community portability:** verified hardware/driver/OS matrix. Prepare
+  reproducible reports; physical AMD/Intel hardware depends on additional equipment or
+  contributions. CPU/PoCL CI and packaging remain verifiable by the project.
+- **Interoperability:** sharing storage between providers/contexts or moving
+  directly between APIs has low priority. Backend choice is
+  explicit; automatic migrations are not introduced.
+- **Sparse operations, mutable views and full NumPy compatibility:** outside this stage.
+  Autodiff, solvers as a library API and domain frameworks are not goals.
 
-## Proveedores e instalación
+## Providers and installation
 
-NumPy es la única dependencia obligatoria. OpenCL, Vulkan y CUDA son extras
-independientes; un usuario OpenCL no instala CUDA. Las capacidades ausentes
-producen una alternativa válida dentro del backend/contrato elegido, o un error
-explícito. No cambiar dtype, precisión o backend silenciosamente.
+NumPy is the only mandatory dependency. OpenCL, Vulkan and CUDA are independent
+extras; an OpenCL user does not install CUDA. Missing capabilities
+produce a valid alternative within the selected backend/contract, or an explicit
+error. Do not silently change dtype, accuracy or backend.
 
-CLBlast ya tiene GEMM batched/strided-batched y GEMV/DOT cuando los símbolos están
-disponibles; custom OpenCL/Vulkan ya usa tiles locales/de registros. CUDA tiene
-memoria, NVRTC, cuBLAS, lotes, GEMM custom float32 tiled, fusión elementwise/map-reduce
-y normas estables float32/64 eager/compiladas para ambos proveedores BLAS. La API
-común también incluye selección residente `where(condition, x, y)` con broadcasting
-de tres argumentos y composición con fusión elementwise/map-reduce; graphs siguen
-pendientes. Consulta los [resultados de selección](selection-results.md). Los informes
-históricos describen cada etapa y no sustituyen el [contrato actual](compatibility.md).
+CLBlast already has batched/strided-batched GEMM and GEMV/DOT when symbols are
+available; custom OpenCL/Vulkan already uses local/register tiles. CUDA has
+memory, NVRTC, cuBLAS, batches, custom tiled float32 GEMM, elementwise/map-reduce fusion
+and stable eager/compiled float32/64 norms for both BLAS providers. The common API
+also includes resident `where(condition, x, y)` selection with three-argument
+broadcasting and composition with elementwise/map-reduce fusion; graphs remain
+pending. See the [selection results](selection-results.md). Historical
+reports describe each stage and do not replace the [current contract](compatibility.md).
 
-La [iteración de extremos](extrema-results.md) añade min/max residentes por ejes,
-conservación de dtype y composición compilada. Las primeras recetas de softmax
-y logsumexp quedan en `examples`, como clientes de esas primitivas. No incorporan
-autodiff ni una API de redes en la biblioteca.
+The [extrema iteration](extrema-results.md) adds resident min/max along axes,
+dtype preservation and compiled composition. Initial softmax
+and logsumexp recipes remain in `examples`, as clients of those primitives. They do not
+add autodiff or a network API to the library.
 
-La [preparación de extremos materializados](extrema-planning-results.md) promueve
-la ruta cooperativa existente para min/max float32 compilados en OpenCL/CUDA.
-Dos rondas reproducen la mejora residente y muestran ganancias completas desiguales;
-Vulkan conserva su ruta por regresiones repetidas.
+[Materialized extrema preparation](extrema-planning-results.md) promotes
+the existing cooperative path for compiled float32 min/max on OpenCL/CUDA.
+Two rounds reproduce the resident improvement and show uneven complete-flow gains;
+Vulkan retains its path because of repeated regressions.
 
-El [cliente de red densa](dense-network-results.md) ya ejercita inferencia y
-gradientes explícitos usando las primitivas existentes. Conserva NumPy, CuPy y
-los proveedores nativos, casos pequeños/regulares/impares y errores explícitos.
-La brecha float64 de CUDA custom justifica estudiar su GEMM directo, después de
-separar ese coste del resto del flujo; no añade una API de redes al runtime.
+The [dense-network client](dense-network-results.md) already exercises inference and
+explicit gradients using existing primitives. It retains NumPy, CuPy and
+native providers, small/regular/odd cases and explicit errors.
+The CUDA custom float64 gap justifies studying its direct GEMM after
+separating that cost from the remaining flow; it does not add a network API to the runtime.
 
-El [experimento GEMM float64](cuda-fp64-gemm-results.md) confirma el peso de
-GEMM, pero rechaza promover un tile compartido 16×16: dos rondas no mejoran
-consistentemente el flujo y repiten regresiones estrechas.
+The [float64 GEMM experiment](cuda-fp64-gemm-results.md) confirms GEMM's
+weight but rejects promoting a shared 16×16 tile: two rounds do not improve
+the flow consistently and repeat narrow-shape regressions.
 
-El [experimento de contracción float64](fp64-contraction-results.md) aísla FMA
-dentro de cada geometría y compilador, conservando las políticas predeterminadas
-del runtime. La prioridad siguiente es reproducir su efecto en inferencia y SGD
-completos de CUDA custom, con selección experimental explícita y presupuesto de
-error. Solo una ganancia aplicada repetida justificaría diseñar una política
-pública opt-in;
-el microbenchmark no promueve un tile ni demuestra mayor precisión en todo caso.
+The [float64 contraction experiment](fp64-contraction-results.md) isolates FMA
+within each geometry and compiler, preserving the runtime's default policies.
+The next priority is to reproduce its effect on complete CUDA custom inference and SGD,
+with explicit experimental selection and an error budget.
+Only a repeated applied gain would justify designing a public opt-in
+policy;
+the microbenchmark does not promote a tile or demonstrate greater accuracy in every case.
 
-Los [osciladores acoplados](oscillators-results.md) añaden un cliente de pasos
-fijos con GEMV repetido y un paso compilado reutilizable. La trayectoria modal
-y la energía distinguen error del integrador de diferencias de backend. El
-modelo permanece en ejemplos, sin ampliar la API pública con física o bucles GPU.
-Sus tiempos justifican, como frente independiente, descomponer despacho,
-asignaciones y esperas del ejecutor preparado antes de optimizarlas.
+[Coupled oscillators](oscillators-results.md) add a fixed-step client
+with repeated GEMV and a reusable compiled step. The modal trajectory
+and energy distinguish integrator error from backend differences. The
+model remains in examples without expanding the public API with physics or GPU loops.
+Its times justify, as an independent area, decomposing dispatch,
+allocations and waits in the prepared executor before optimizing them.
 
-CuPy/cuBLAS/nvmath son referencias de rendimiento y precisión; PyTorch/JAX se
-incorporan cuando un workload comparable justifique la dependencia de benchmark.
-No son dependencias obligatorias ni se usa su tiempo como techo físico universal.
+CuPy/cuBLAS/nvmath are performance and accuracy references; PyTorch/JAX are
+added when a comparable workload justifies the benchmark dependency.
+They are not mandatory dependencies and their time is not used as a universal physical ceiling.
 
-## Publicación y documentación
+## Publication and documentation
 
-Antes de publicar: revisar API, nombre/versión, wheel/sdist, errores por capacidades
-faltantes y matriz validada. Anunciar separadamente estabilidad de API y soporte
-experimental de dispositivos no comprobados; no prometer validación universal.
-La [estimación de release](release-readiness.md) reserva 2–4 iteraciones de
-endurecimiento para una candidata acotada, seguidas de validación externa antes
-de declararla estable; no exige alcanzar paridad de rendimiento con CuPy.
+Before publication: review API, name/version, wheel/sdist, errors for missing
+capabilities and the validated matrix. Announce API stability separately from experimental
+support for unverified devices; do not promise universal validation.
+The [release estimate](release-readiness.md) reserves 2–4 hardening iterations
+for a limited candidate, followed by external validation before
+declaring it stable; it does not require performance parity with CuPy.
 
-Para cambios grandes, una auditoría económica de solo lectura identifica documentos
-impactados; el agente principal integra y verifica. Mantener consistentes README,
-compatibilidad, capacidades e instalación, conservando resultados históricos.
-Ver [verificación local](verification.md) y [próximas aplicaciones](application-measurement-plan.md).
+For large changes, an economical read-only audit identifies affected documents;
+the main agent integrates and verifies. Keep README,
+compatibility, capabilities and installation consistent while retaining historical results.
+See [local verification](verification.md) and [next applications](application-measurement-plan.md).

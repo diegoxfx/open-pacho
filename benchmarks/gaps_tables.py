@@ -63,14 +63,14 @@ def run(root, output, paths=None):
         writer.writeheader()
         writer.writerows(rows)
     text = [
-        "# Mediciones completas",
+        "# Complete measurements",
         "",
-        f"{len(rows) // 2} configuraciones, ambos modos, siete muestras por modo. Milisegundos.",
+        f"{len(rows) // 2} configurations, both modes, seven samples per mode. Milliseconds.",
         "",
         (
-            "NumPy: mínimo de medianas entre 1/8/16 hilos, independientemente por modo. "
-            "OpenPacho: compile en operaciones; solver de la implementación medida en solve; eager en controles scale. "
-            "CSV conserva también eager y todos los hilos."
+            "NumPy: minimum median across 1/8/16 threads, independently for each mode. "
+            "OpenPacho: compile for operations; the measured implementation's solver for solve; eager for scale controls. "
+            "CSV also preserves eager execution and all thread counts."
         ),
         "",
     ]
@@ -78,7 +78,7 @@ def run(root, output, paths=None):
         text += [
             f"## {mode}",
             "",
-            "| Caso / tamaño / dtype | NumPy | OpenCL | CLBlast | Vulkan | CuPy | cuBLAS | nvmath |",
+            "| Case / size / dtype | NumPy | OpenCL | CLBlast | Vulkan | CuPy | cuBLAS | nvmath |",
             "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
         ]
         keys = dict.fromkeys((r["case"], r["size_or_shapes"], r["dtype"]) for r in rows)
@@ -112,11 +112,11 @@ def run(root, output, paths=None):
             text.append("| " + " / ".join(key) + " | " + " | ".join(values) + " |")
         text.append("")
     text += [
-        "## Precisión junto al tiempo residente",
+        "## Accuracy alongside resident time",
         "",
-        "Los errores son diagnósticos fuera del cronómetro. Float64 frente a float64 es una comparación de igual precisión; no certifica exactitud. Para solvers se usa la solución generadora y se identifica el redondeo del RHS. CSV conserva la referencia y precisión exactas.",
+        "Errors are diagnostics outside the clock. Float64 against float64 is a same-precision comparison; it does not certify accuracy. Solvers use the generating solution and identify RHS rounding. CSV preserves the exact reference and its precision.",
         "",
-        "| Caso / tamaño / dtype | Implementación | ms | Error abs. máx | Error L2 relativo | Residuo verdadero | Error hacia atrás |",
+        "| Case / size / dtype | Implementation | ms | Max abs. error | Relative L2 error | True residual | Backward error |",
         "| --- | --- | ---: | ---: | ---: | ---: | ---: |",
     ]
 
@@ -160,15 +160,15 @@ def run(root, output, paths=None):
 
     fig, axes = plt.subplots(1, 3, figsize=(14, 5), constrained_layout=True)
     selectors = [
-        ("gemv", "[8192, 8192] @ [8192]", "GEMV 8192² · matriz de 256 MiB"),
-        ("jacobi_solve", "2048", "Jacobi completo · 2048 variables"),
+        ("gemv", "[8192, 8192] @ [8192]", "GEMV 8192² · 256 MiB matrix"),
+        ("jacobi_solve", "2048", "Complete Jacobi solve · 2048 variables"),
         ("matmul", "2048", "Matmul 2048²"),
     ]
     names = ("numpy", "opencl", "opencl-clblast", "vulkan", "cupy")
     for axis, (case, size, title) in zip(axes, selectors):
         for mode, dx, color, label in (
-            ("resident", -0.19, "#2563eb", "Datos residentes"),
-            ("end_to_end", 0.19, "#ea580c", "Carga + cálculo + descarga"),
+            ("resident", -0.19, "#2563eb", "Resident data"),
+            ("end_to_end", 0.19, "#ea580c", "Upload + compute + download"),
         ):
             values = []
             for name in names:
@@ -192,13 +192,11 @@ def run(root, output, paths=None):
             range(len(names)), ["NumPy", "OpenCL", "CLBlast", "Vulkan", "CuPy"], rotation=35
         )
         axis.set_yscale("log")
-        axis.set_ylabel("Mediana (ms, escala logarítmica)")
+        axis.set_ylabel("Median (ms, log scale)")
         axis.grid(axis="y", alpha=0.2)
         axis.set_axisbelow(True)
     axes[0].legend(fontsize=8)
-    fig.suptitle(
-        "OpenPacho: dónde ayuda la residencia y dónde persiste el coste de ejecución", fontsize=13
-    )
+    fig.suptitle("OpenPacho: where residency helps and execution costs persist", fontsize=13)
     fig.savefig(output / "gaps.png", dpi=160)
     fig.savefig(output / "gaps.svg")
     plt.close(fig)

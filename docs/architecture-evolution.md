@@ -1,158 +1,158 @@
-# Dirección arquitectónica acordada — 2026-09-12
+# Agreed architectural direction — 2026-09-12
 
-OpenPacho es una librería de operaciones de arrays y matrices en GPU con API
-cercana a NumPy y elección explícita de backend. Los algoritmos de dominio son
-aplicaciones: solvers, redes neuronales y simulaciones pertenecen a ejemplos y
-benchmarks. Esta decisión delimita el producto; no exige abandonar sus pruebas.
+OpenPacho is a GPU array and matrix operations library with an API
+close to NumPy and explicit backend selection. Domain algorithms are
+applications: solvers, neural networks, and simulations belong in examples and
+benchmarks. This decision defines the product's boundaries; it does not require abandoning their tests.
 
-## Estado de esta revisión
+## Status of this revision
 
-- Implementado: solvers y sistemas preparados movidos a `examples/solvers.py`,
-  fuera del wheel y de los exports del paquete. Los ejemplos usan API pública;
-  `get_backend(array)` obtiene su instancia existente sin transferencias.
-- Ya existía: NumPy como única dependencia obligatoria; extras independientes
-  `opencl`, `vulkan` y `cuda`, con importación diferida de runtimes GPU.
-- El resto de este documento define trabajo futuro. No se han implementado aquí
-  nuevos contratos de capacidades, layouts, modos matemáticos, autotuning ni un
-  ejecutor nativo Vulkan. Los resultados históricos conservan su código original.
+- Implemented: solvers and prepared systems moved to `examples/solvers.py`,
+  outside the wheel and package exports. Examples use the public API;
+  `get_backend(array)` obtains their existing instance without transfers.
+- Already present: NumPy as the only mandatory dependency; independent
+  `opencl`, `vulkan`, and `cuda` extras, with deferred GPU runtime imports.
+- The remainder of this document defines future work. No new capability,
+  layout, math-mode, or autotuning contracts, or native Vulkan executor, have
+  been implemented here. Historical results retain their original code.
 
-La [iteración posterior de dispatch Vulkan](vulkan-dispatch-results.md) implementa
-una tabla CFFI tipada y un diagnóstico separado. Sigue sin grabador nativo C/C++
-de grupos; no cambia el estado pendiente de layouts/modos/autotuning.
-La [ronda entre backends](backend-sharing-results.md) añade variantes seleccionadas
-por capacidad y comparte el GEMM tiled con CUDA. Todavía no constituye el contrato
-general de capacidades propuesto aquí.
+The [later Vulkan dispatch iteration](vulkan-dispatch-results.md) implements
+a typed CFFI table and separate diagnostics. There is still no native C/C++
+group recorder; this does not change the pending status of layouts/modes/autotuning.
+The [cross-backend round](backend-sharing-results.md) adds capability-selected
+variants and shares tiled GEMM with CUDA. It still does not constitute the general
+capability contract proposed here.
 
-La [ronda de routing y finalización](routing-completion-results.md) implementa dos
-fronteras acotadas: adaptadores RNG propios de cada backend y factoría opcional
-de lowering, resuelta al preparar el plan. No constituye todavía un protocolo
-general de layouts/capacidades ni un mecanismo público de plugins.
+The [routing and completion round](routing-completion-results.md) implements two
+bounded interfaces: backend-specific RNG adapters and an optional lowering
+factory, resolved when preparing the plan. This is still neither a general
+layout/capability protocol nor a public plugin mechanism.
 
-## Separación y coste de abstracción
+## Separation and abstraction cost
 
-Se evoluciona la separación existente, sin añadir una cadena de proxies por
-operación ni sustituirla por un compilador general de Python:
+The existing separation evolves without adding a chain of proxies per
+operation or replacing it with a general Python compiler:
 
-1. **Fachada semántica:** operaciones, formas, broadcasting, promoción y errores.
-2. **Planificación opcional:** IR de operaciones genéricas, layouts, usos, fusión
-   y decisiones de materialización. Eager sigue siendo una ruta independiente.
-3. **Contratos internos:** protocolo tipado de primitivas y descripción inmutable
-   de capacidades consultada al crear contexto/especializar un plan. Incluir
-   dtype, límites, layouts y garantías numéricas por operación; un booleano
-   «soporta float64» no describe todas sus funciones.
-4. **Ejecución por backend:** buffers, vida útil, colas, kernels y proveedores.
-   Resolver implementaciones al preparar el plan y enlazar llamadas directamente;
-   mantener solo la validación necesaria por llamada. No inferir capacidades de
-   nombres de fabricantes ni repetir negociación dinámica por elemento/dispatch.
+1. **Semantic facade:** operations, shapes, broadcasting, promotion, and errors.
+2. **Optional planning:** IR for generic operations, layouts, uses, fusion,
+   and materialization decisions. Eager remains an independent path.
+3. **Internal contracts:** a typed primitive protocol and immutable capability
+   description queried when creating a context/specializing a plan. Include
+   dtype, limits, layouts, and numerical guarantees per operation; a Boolean
+   “supports float64” does not describe all its functions.
+4. **Backend execution:** buffers, lifetimes, queues, kernels, and providers.
+   Resolve implementations when preparing the plan and bind calls directly;
+   retain only the validation needed per call. Do not infer capabilities from
+   vendor names or repeat dynamic negotiation per element/dispatch.
 
-No existe una primitiva «solver» en el contrato. Un backend habilita un ejemplo
-cuando tiene sus operaciones necesarias. CUDA ya dispone de normas estables
-float32/64 para ejecución eager y compilada, con proveedor custom o cuBLAS; los
-algoritmos siguen en examples. La matriz de documentación debe derivarse/comprobarse
-con esos contratos y tests, sin convertir «implementado» en «validado en todos los
-dispositivos».
+There is no “solver” primitive in the contract. A backend enables an example
+when it has the required operations. CUDA already has stable float32/64 norms
+for eager and compiled execution with custom or cuBLAS providers; the
+algorithms remain in examples. The documentation matrix must be derived/checked
+against those contracts and tests, without equating “implemented” with “validated on all
+devices.”
 
-Contexto/almacenamiento y proveedor BLAS son responsabilidades distintas. Dejar
-una frontera clara facilita kernels y pruebas; compartir arrays entre instancias
-de proveedor o transferir directamente entre APIs es de **baja prioridad**. No
-se introduce migración automática de backend ni hace falta resolver interoperabilidad
-OpenCL/Vulkan/CUDA para optimizar cada uno.
+Context/storage and BLAS provider are distinct responsibilities. Keeping
+a clear boundary facilitates kernels and tests; sharing arrays between provider
+instances or transferring directly between APIs is **low priority**. No automatic
+backend migration is introduced, and OpenCL/Vulkan/CUDA interoperability need not
+be resolved to optimize each backend.
 
-## Kernels custom, proveedores y layouts
+## Custom kernels, providers, and layouts
 
-Kernels propios competitivos para GEMM, GEMV, DOT, reducciones y sus composiciones
-son trabajo principal continuo. CLBlast/cuBLAS se conservan como proveedores y
-referencias; ganar en un solver fusionado no demuestra ganar en GEMM aislado.
-Evaluar precisión, memoria y distribución de tamaños, incluidos rectangulares,
-impares y no potencias de dos. «Mayoría» exige una suite predefinida y publicar
-regresiones/casos mixtos, no contar solo formas favorables.
+Competitive custom kernels for GEMM, GEMV, DOT, reductions, and their compositions
+are ongoing core work. CLBlast/cuBLAS are retained as providers and
+references; winning in a fused solver does not demonstrate a win in isolated GEMM.
+Evaluate precision, memory, and the size distribution, including rectangular,
+odd, and non-power-of-two sizes. “Majority” requires a predefined suite and published
+regressions/mixed cases, rather than counting only favorable shapes.
 
-Empezar layouts por transpuestas lógicas 2D y flags de BLAS, con kernels capaces
-de consumirlos. Elegir packing/materialización según el consumidor, reutilización
-y memoria: para k usos, comparar `T_pack + k*T_packed` con `k*T_transposed`.
-Incluir packing en tiempo completo y memoria máxima; no ocultarlo en preparación.
-Una copia también puede ser necesaria si el consumidor no acepta ese layout:
-usar una alternativa válida o materializar explícitamente, sin prometer que jamás
-se copia. No se amplía todavía a vistas mutables/aliasing completo de NumPy.
+Begin layouts with logical 2D transposes and BLAS flags, with kernels able
+to consume them. Choose packing/materialization according to the consumer, reuse,
+and memory: for k uses, compare `T_pack + k*T_packed` with `k*T_transposed`.
+Include packing in complete time and peak memory; do not hide it in preparation.
+A copy may also be needed if the consumer does not accept that layout:
+use a valid alternative or materialize explicitly, without promising that copying
+never occurs. This does not yet extend to mutable views/full NumPy aliasing.
 
-## Vulkan: diagnóstico antes de sustituir el adaptador
+## Vulkan: diagnostics before replacing the adapter
 
-La brecha medida no establece un muro teórico de Vulkan. Mezcla preparación
-Python/CFFI, administración propia, llamadas al driver, GPU y esperas. La mejora
-ya comprobada del pool muestra margen de implementación; no cuantifica qué
-porcentaje restante corresponde al binding Python.
+The measured gap does not establish a theoretical Vulkan barrier. It mixes
+Python/CFFI preparation, internal management, driver calls, GPU work, and waits. The
+already verified pool improvement demonstrates implementation headroom; it does not
+quantify the remaining percentage attributable to the Python binding.
 
-Prioridad: medir por separado tiempo de host, llamadas nativas y timestamps GPU;
-contadores de asignación, descriptores, envíos, bytes y memoria. No llamar «tiempo
-Python» a pared menos duración de kernels: hay colas, driver y esperas intermedias.
-Khronos documenta [reutilización y coste de command buffers](https://docs.vulkan.org/samples/latest/samples/performance/command_buffer_usage/README.html)
-y [responsabilidades de sincronización del host](https://docs.vulkan.org/guide/latest/threading.html).
+Priority: measure host time, native calls, and GPU timestamps separately;
+count allocations, descriptors, submissions, bytes, and memory. Do not call wall
+time minus kernel duration “Python time”: queues, the driver, and intermediate waits are involved.
+Khronos documents [command-buffer reuse and cost](https://docs.vulkan.org/samples/latest/samples/performance/command_buffer_usage/README.html)
+and [host synchronization responsibilities](https://docs.vulkan.org/guide/latest/threading.html).
 
-Si el perfil lo justifica, construir un ejecutor nativo pequeño de comandos,
-descriptores, pools y envío que consuma el mismo plan. Compararlo con el adaptador
-actual usando mismos kernels, inputs, barreras, precisión, política de memoria y
-salidas. Publicar también latencia, errores y coste de empaquetarlo por SO.
-Conservar protección de recursos en vuelo y locks donde correspondan. Extenderlo
-solo con ganancia reproducible; un binding propio completo no es requisito previo.
-Ni esta ruta ni Vulkan prometen superar limitaciones del driver/hardware.
+If the profile warrants it, build a small native executor for commands,
+descriptors, pools, and submission that consumes the same plan. Compare it with the current
+adapter using the same kernels, inputs, barriers, precision, memory policy, and
+outputs. Also publish latency, errors, and packaging costs per OS.
+Retain protection for resources in flight and locks where appropriate. Extend it
+only with reproducible gains; a complete custom binding is not a prerequisite.
+Neither this path nor Vulkan promises to overcome driver/hardware limitations.
 
-## Integridad de ejemplos y comparaciones
+## Integrity of examples and comparisons
 
-Las mejoras deben activarse mediante operaciones ordinarias y APIs públicas
-documentadas (`compile` opcional), dentro del compilador/backend. No reconocer
-nombres de algoritmos, cambiar frecuencias de chequeo, tolerancias o datos para
-favorecer OpenPacho. Las fases compile/prepare preexistentes en los solvers se
-conservan y se declaran; no se presentan como ejecución directa sin adaptación.
+Improvements must be activated through ordinary operations and documented public
+APIs (optional `compile`), within the compiler/backend. Do not recognize
+algorithm names or change check frequencies, tolerances, or data to
+favor OpenPacho. Existing compile/prepare phases in solvers are
+retained and declared; they are not presented as direct execution without adaptation.
 
-Una mejora de algoritmo requiere justificación y comparación separada con
-referencias equivalentes. Comparar eager/compilado, primera ejecución, preparación,
-residente y extremo a extremo, con mismo trabajo o convergencia y error comparable.
-La velocidad de CuPy es una referencia práctica, no un límite físico demostrado.
-Igualarla sería valioso por la portabilidad, selección de backend e integración;
-CuPy también ofrece una interfaz de arrays de alto nivel.
+An algorithm improvement requires justification and a separate comparison with
+equivalent references. Compare eager/compiled, first execution, preparation,
+resident, and end-to-end execution, with the same work or convergence and comparable error.
+CuPy speed is a practical reference, not a demonstrated physical limit.
+Matching it would be valuable for portability, backend selection, and integration;
+CuPy also offers a high-level array interface.
 
-El alcance no incluye autodiff, entrenamiento distribuido ni todas las
-[transformaciones de JAX](https://docs.jax.dev/en/latest/key-concepts.html).
-Hay solapamiento en operaciones de arrays y compilación; comparar esos workloads
-puede ser útil sin convertir la paridad con JAX en objetivo del producto.
+The scope does not include autodiff, distributed training, or all
+[JAX transformations](https://docs.jax.dev/en/latest/key-concepts.html).
+There is overlap in array operations and compilation; comparing those workloads
+can be useful without making JAX parity a product goal.
 
-## Modos matemáticos y autotuning: tracks futuros
+## Math modes and autotuning: future tracks
 
-Conservar por defecto el contrato actual y diseñar políticas explícitas de
-aritmética rápida y acumulación más robusta. Especificar por operación: dtype de
-entrada/acumulación/salida, contracción FMA, reasociación, aproximaciones de
-trascendentes, subnormales, NaN/Inf, ceros con signo y permisos para precisión
-reducida. Una política «precisa» no promete reproducibilidad bit a bit ni resultados
-representables cuando no caben en el dtype. Rechazar garantías no soportadas.
+Preserve the current contract by default and design explicit policies for
+fast arithmetic and more robust accumulation. Specify per operation: input/accumulator/output
+dtype, FMA contraction, reassociation, transcendental approximations,
+subnormals, NaN/Inf, signed zeros, and permission for reduced
+precision. An “accurate” policy promises neither bitwise reproducibility nor representable
+results when they do not fit the dtype. Reject unsupported guarantees.
 
-FMA calcula multiplicación más suma con un solo redondeo y puede mejorar tanto
-precisión como velocidad. MAD no es una garantía portable equivalente a FMA
-correctamente redondeada; ver [funciones matemáticas de OpenCL C](https://registry.khronos.org/OpenCL/specs/unified/html/OpenCL_C.html#math-functions).
-No tratar «desactivar FMA» como sinónimo universal de precisión. Políticas futuras
-deben participar en claves de kernels/planes/tuning y metadatos de benchmarks;
-no comparar fast-math contra modos conservadores como si fueran el mismo contrato.
+FMA computes multiplication plus addition with a single rounding and can improve both
+accuracy and speed. MAD is not a portable guarantee equivalent to correctly
+rounded FMA; see [OpenCL C math functions](https://registry.khronos.org/OpenCL/specs/unified/html/OpenCL_C.html#math-functions).
+Do not treat “disable FMA” as a universal synonym for accuracy. Future policies
+must participate in kernel/plan/tuning keys and benchmark metadata;
+do not compare fast-math with conservative modes as though they had the same contract.
 
-Autotuning es un track secundario, con activación/presupuesto explícitos, búsqueda
-acotada y ruta portable sin calibración. Elegir entre variantes correctas de
-tile, grupos, vectorización, packing y fusiones según medidas. Cachear por
-dispositivo, driver/compilador, versión de kernels, operación, shape/layout, dtype
-y política matemática; invalidar ante cambios y no extrapolar un ganador local a
-todo AMD/NVIDIA/Intel. Separar coste de tuning de ejecución sostenida. Si el usuario
-fija proveedor, el tuning respeta esa selección.
+Autotuning is a secondary track, with explicit activation/budget, a bounded
+search, and a portable path without calibration. Select among correct variants of
+tiles, groups, vectorization, packing, and fusion according to measurements. Cache by
+device, driver/compiler, kernel version, operation, shape/layout, dtype,
+and math policy; invalidate on changes and do not extrapolate a local winner to
+all AMD/NVIDIA/Intel hardware. Separate tuning cost from sustained execution. If the user
+fixes a provider, tuning respects that selection.
 
-## Validación y expansión
+## Validation and expansion
 
-La primera publicación debe anunciar precisamente su matriz validada. Que la
-comunidad aporte AMD/Intel u otros SO no impide probar ahora wheel CPU, aislamiento
-de extras y CI reproducible. No confundir conformidad PoCL CPU con validación GPU.
-Una versión estable de API puede tener un soporte de hardware aún experimental.
+The first release must state its validated matrix precisely. Community
+contributions for AMD/Intel or other OSes do not prevent testing the CPU wheel, extras
+isolation, and reproducible CI now. Do not confuse PoCL CPU conformance with GPU validation.
+A stable API release may still have experimental hardware support.
 
-Añadir redes densas y simulaciones físicas como cargas de ejemplo según el
-[plan aplicado](application-measurement-plan.md), con errores y memoria además
-de tiempos. No añadir frameworks de dominio al paquete ni imponerlos como dependencias.
+Add dense networks and physical simulations as example workloads according to the
+[application plan](application-measurement-plan.md), with errors and memory as well
+as timings. Do not add domain frameworks to the package or impose them as dependencies.
 
-Para cambios importantes, usar una auditoría de documentación acotada y de solo
-lectura con un subagente económico (Luna/Spark disponible): identificar archivos,
-afirmaciones y enlaces que necesitan cambiar. El agente principal decide, edita y
-verifica. Los informes históricos se conservan como cortes fechados; la auditoría
-no crea una automatización permanente ni sustituye pruebas.
+For major changes, use a bounded, read-only documentation audit
+with an economical subagent (available Luna/Spark): identify files,
+claims, and links needing changes. The main agent decides, edits, and
+verifies. Historical reports are retained as dated snapshots; the audit
+creates no permanent automation and does not replace tests.

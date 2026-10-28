@@ -1,14 +1,14 @@
-# Extremos residentes y normalización — 2026-10-22
+# Resident extrema and normalization — 2026-10-22
 
-OpenPacho añade `min` y `max`, los alias `amin`/`amax`, métodos de arrays y
-dispatch NumPy. Se ejecutan en NumPy, OpenCL, Vulkan y CUDA, tanto eager como
-mediante `compile`. Esto permite normalización por ejes y recetas con
-desplazamiento por el máximo sin descargar arrays para obtener ese máximo.
+OpenPacho adds `min` and `max`, the `amin`/`amax` aliases, array methods and
+NumPy dispatch. They run on NumPy, OpenCL, Vulkan and CUDA, both eagerly and
+through `compile`. This enables normalization along axes and recipes that
+shift by the maximum without downloading arrays to obtain that maximum.
 
-La utilidad está ligada al [plan de aplicaciones](application-measurement-plan.md):
-normalización, transformaciones previas y futuras redes densas. Las recetas
-`softmax` y `logsumexp` viven en `examples/normalization.py`; no se añaden
-algoritmos de dominio al runtime ni dependencias obligatorias.
+Their utility is tied to the [application plan](application-measurement-plan.md):
+normalization, preprocessing transforms and future dense networks. The
+`softmax` and `logsumexp` recipes live in `examples/normalization.py`; no
+domain algorithms or mandatory dependencies are added to the runtime.
 
 ```python
 import numpy as np
@@ -23,80 +23,80 @@ def normalize(x):
 
 x = p.asarray([[10000, 10001, 9999]], dtype=np.float32, backend="opencl")
 weights, log_total = normalize(x)
-host_weights = p.asnumpy(weights)  # observación explícita al final
+host_weights = p.asnumpy(weights)  # explicit observation at the end
 ```
 
-Estas recetas requieren entradas flotantes finitas y un eje no vacío. No hacen
-un chequeo de datos mediante descargas; NaN e infinitos siguen la aritmética
-ordinaria. `logsumexp` conserva el eje reducido para broadcasting. También se
-mantienen los límites existentes de cada backend: por ejemplo, Vulkan no admite
-`exp`/`log` float64 en esta implementación GLSL. El ejemplo de verificación usa
-float32 en todos los backends.
+These recipes require finite floating-point inputs and a nonempty axis. They do
+not check data through downloads; NaN and infinities follow ordinary
+arithmetic. `logsumexp` retains the reduced axis for broadcasting. Each backend's
+existing limits also remain: for example, Vulkan does not support
+float64 `exp`/`log` in this GLSL implementation. The verification example uses
+float32 on every backend.
 
-## Contrato
+## Contract
 
-- `axis=None`, entero positivo/negativo o tupla de ejes; `keepdims` y escalares.
-- Dtype de entrada preservado: float32/64, bool e int32/64/uint32/64 donde el
-  backend los admite. CUDA sigue limitado a float32/64 y bool.
-- Los enteros nunca pasan por una representación flotante para compararse.
-- NaN se propaga; los infinitos participan normalmente. La carga útil del NaN
-  no tiene una garantía de bits entre backends.
-- En ceros de signos distintos, min prefiere `-0` y max prefiere `+0`. Si todos
-  los ceros tienen el mismo signo, lo conserva. Esta regla asociativa también
-  rige los parciales; puede diferir de la elección de signo de NumPy.
-- Reducir un eje vacío falla explícitamente, incluso cuando la salida también
-  sería vacía. Una salida vacía con ejes reducidos no vacíos es válida.
-  `axis=()` conserva forma, valores y dtype.
-- Sin `initial`, `where`, `out`, `nanmin`/`nanmax` ni dtype de acumulación.
-  `fuse` continúa siendo solo elementwise; las reducciones usan `compile`.
+- `axis=None`, a positive/negative integer or a tuple of axes; `keepdims` and scalars.
+- Input dtype preserved: float32/64, bool and int32/64/uint32/64 where the
+  backend supports them. CUDA remains limited to float32/64 and bool.
+- Integers never pass through a floating-point representation for comparison.
+- NaN propagates; infinities participate normally. NaN payloads
+  have no bitwise guarantee across backends.
+- For zeros of different signs, min prefers `-0` and max prefers `+0`. If all
+  zeros have the same sign, it is preserved. This associative rule also
+  governs partials; it may differ from NumPy's sign choice.
+- Reducing an empty axis fails explicitly, even when the output would also
+  be empty. An empty output with nonempty reduced axes is valid.
+  `axis=()` preserves shape, values and dtype.
+- No `initial`, `where`, `out`, `nanmin`/`nanmax` or accumulation dtype.
+  `fuse` remains elementwise only; reductions use `compile`.
 
-## Implementación y límites
+## Implementation and limits
 
-`_reductions.py` comparte el neutro y la combinación de extremos entre kernels
-eager, acumulación por lane, árbol cooperativo y combinación de parciales. No
-se reutilizan `fmin`/`fmax` con una semántica distinta para NaN. Los límites
-enteros se construyen en su tipo, incluido el mínimo int64 sin overflow.
+`_reductions.py` shares the identity and extrema combination between eager
+kernels, per-lane accumulation, the cooperative tree and partial combination.
+It does not reuse `fmin`/`fmax` with different NaN semantics. Integer
+limits are constructed in their own type, including the int64 minimum without overflow.
 
-El IR distingue `sum`, `min` y `max`; la caché de cuerpos Vulkan también incluye
-la operación. `explain` la muestra en pasos `reduce`/`map_reduce`. Los productores
-elementwise privados elegibles se fusionan con extremos, sin temporal completo.
-Productores compartidos o devueltos mantienen las fronteras existentes.
+The IR distinguishes `sum`, `min` and `max`; the Vulkan body cache also includes
+the operation. `explain` shows it in `reduce`/`map_reduce` steps. Eligible private
+elementwise producers fuse with extrema, without a full temporary.
+Shared or returned producers retain the existing boundaries.
 
-La geometría de las reducciones existentes se conserva. En particular, una
-reducción compilada sin productor elementwise puede usar la primitiva eager.
-Este lote demuestra funcionalidad y residencia; no promete aceleración ni
-compara tiempos con NumPy, CuPy o bibliotecas de redes neuronales.
+The geometry of existing reductions is preserved. In particular, a
+compiled reduction without an elementwise producer may use the eager primitive.
+This batch demonstrates functionality and residency; it does not promise acceleration or
+compare times against NumPy, CuPy or neural-network libraries.
 
-Las rutas de suma mantienen sus expresiones y reglas anteriores. CUDA habilita
-min/max booleanos, pero la suma con acumulador bool continúa sin soporte;
-sumar entradas bool con acumulador float32/64 explícito sigue siendo válido.
+Sum paths retain their previous expressions and rules. CUDA enables
+boolean min/max, but sum with a bool accumulator remains unsupported;
+summing bool inputs with an explicit float32/64 accumulator remains valid.
 
-## Verificación
+## Verification
 
-**267 pruebas dirigidas pasan y cuatro se omiten** por los enteros no admitidos
-en CUDA: 48 casos nuevos y 219 regresiones/controles dirigidos. OpenCL, Vulkan y
-CUDA fueron obligatorios; no se ejecutó toda la suite ni se reconstruyó el wheel.
+**267 targeted tests pass and four are skipped** for integers unsupported
+on CUDA: 48 new cases and 219 targeted regressions/controls. OpenCL, Vulkan and
+CUDA were required; the full suite was not run and the wheel was not rebuilt.
 
-La cobertura nueva comprueba ejes, keepdims, dispatch NumPy, captura, parciales
-de más de 4096 elementos, NaN/infinito, ceros de ambos signos, extremos enteros,
-identidad bool, vacíos, errores explícitos, caché de operaciones y rebinding de
-arrays/escalares preparados. El productor `where` seguido de min/max sobre
-`(3,8193)` usa dos lanzamientos por llamada en cada GPU: parciales y combinación,
-con upload/download prohibidos durante la ejecución.
+New coverage checks axes, keepdims, NumPy dispatch, capture, partials
+larger than 4096 elements, NaN/infinity, zeros of both signs, integer extrema,
+bool identity, empty arrays, explicit errors, operation caching and rebinding of
+prepared arrays/scalars. A `where` producer followed by min/max over
+`(3,8193)` uses two launches per call on each GPU: partials and combination,
+with upload/download forbidden during execution.
 
-Softmax y logsumexp se comparan con una referencia float64 para entradas
-positivas/negativas de magnitud 10.000, eager y compiladas. Los pesos se mantienen
-finitos y suman uno dentro de la tolerancia. Las regresiones cubren sum/mean,
-promoción, redondeo antes de acumulación, parciales, salidas compartidas y ABI
-escalar del lowerer. El harness de este último ahora prueba las tres operaciones.
-QA independiente: **APPROVE**, con 2.072 comprobaciones adicionales en NumPy
-sobre dtypes, formas, ejes, vacíos, NaN, ceros y ejecución eager/compilada.
+Softmax and logsumexp are compared against a float64 reference for positive/negative
+inputs of magnitude 10,000, both eager and compiled. Weights remain
+finite and sum to one within tolerance. Regressions cover sum/mean,
+promotion, rounding before accumulation, partials, shared outputs and the
+lowerer's scalar ABI. Its harness now tests all three operations.
+Independent QA: **APPROVE**, with 2,072 additional NumPy checks
+covering dtypes, shapes, axes, empty arrays, NaN, zeros and eager/compiled execution.
 
-Entorno: Windows, RTX 5060 Ti/driver 617.14, Python 3.12.14, NumPy 2.5.3.
-Se usa `--capture=sys`, TEMP accesible y compilador GLSL explícito. El QA también
-ejecutó accidentalmente una selección GPU; no coincidió con otras pruebas o
-mediciones GPU activas. Los informes están en
-`.artifacts/iterations-2026-10-22/extrema-*.xml`: 202 regresiones aprobadas en la
-primera ejecución y 65 pruebas finales tras corregir CUDA y actualizar el harness.
-Se conserva también la evidencia de los fallos iniciales; no se ocultan mediante
-omisiones. El runtime mantiene NumPy como única dependencia base.
+Environment: Windows, RTX 5060 Ti/driver 617.14, Python 3.12.14, NumPy 2.5.3.
+Uses `--capture=sys`, an accessible TEMP and an explicit GLSL compiler. QA also
+accidentally ran a GPU selection; it did not overlap with other active GPU tests or
+measurements. Reports are in
+`.artifacts/iterations-2026-10-22/extrema-*.xml`: 202 regressions passed in the
+first run and 65 final tests after fixing CUDA and updating the harness.
+Evidence of the initial failures is also retained; they are not hidden through
+skips. The runtime retains NumPy as its only base dependency.

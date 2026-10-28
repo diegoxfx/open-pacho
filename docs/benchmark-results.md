@@ -1,94 +1,94 @@
-# Resultados de benchmarks — 2026-09-06
+# Benchmark results — 2026-09-06
 
-**La hipótesis se cumple en muchos casos, pero no como afirmación universal.**
-OpenPacho y CuPy ganaron en determinadas cargas aun incluyendo transferencias.
-Jacobi y descenso por gradiente perdieron en tamaños menores y ganaron a 8192
-variables en los sistemas de prueba.
+**The hypothesis holds in many cases, but not as a universal claim.**
+OpenPacho and CuPy won on certain workloads even including transfers.
+Jacobi and gradient descent lost at smaller sizes and won at 8192
+variables in the test systems.
 
-Equipo: Ryzen 7 5700X3D (8 núcleos, 16 hilos), aproximadamente 32 GB RAM,
-RTX 5060 Ti de 16 GB, Windows 11. NumPy 2.5.3/OpenBLAS 0.3.34.106.0,
-PyOpenCL 2026.1.4, CuPy 14.2.0. CuPy usa CUDA como control independiente;
-OpenPacho sigue ejecutando su backend OpenCL. TF32 deshabilitado.
+Hardware: Ryzen 7 5700X3D (8 cores, 16 threads), approximately 32 GB RAM,
+16 GB RTX 5060 Ti, Windows 11. NumPy 2.5.3/OpenBLAS 0.3.34.106.0,
+PyOpenCL 2026.1.4, CuPy 14.2.0. CuPy uses CUDA as an independent control;
+OpenPacho still runs its OpenCL backend. TF32 disabled.
 
-Una comprobación posterior bajo copias repetidas de 64 MiB confirmó un enlace
-activo **PCIe Gen3 ×8** en este equipo; las copias grandes medidas rondaron
-6–7 GB/s. Esta configuración condiciona el coste de transferencia y no representa
-todos los enlaces posibles de esta GPU. Evidencia local:
-`.artifacts/benchmarks/report-2026-09-06/pcie-probe.json` (no distribuido).
+A subsequent check under repeated 64 MiB copies confirmed an active
+**PCIe Gen3 ×8** link on this machine; measured large copies were around
+6–7 GB/s. This configuration affects transfer costs and does not represent
+all possible links for this GPU. Local evidence:
+`.artifacts/benchmarks/report-2026-09-06/pcie-probe.json` (not distributed).
 
-Se probaron **140 configuraciones**, con **1540 series de tiempos**: 122 casos
-generales de 11 rondas y 18 casos adicionales de solvers de 7 rondas. Todas las
-configuraciones pasaron su validación numérica. Se comparó contra el mejor
-NumPy medido entre 1, 8 y 16 hilos, sin cambiar el código de la librería.
+**140 configurations** were tested, with **1540 timing series**: 122 general
+cases of 11 rounds and 18 additional solver cases of 7 rounds. All
+configurations passed their numerical validation. Comparisons used the best
+measured NumPy result among 1, 8 and 16 threads, without changing library code.
 
-## Tiempos con subida, cálculo y descarga
+## Times including upload, computation and download
 
-Medianas en milisegundos. Runtime inicializado; generación de datos y validación
-fuera del reloj. La CPU ya recibe y devuelve arrays de host, así que no se añade
-una copia artificial a su baseline.
+Medians in milliseconds. Runtime initialized; data generation and validation
+outside the clock. The CPU already receives and returns host arrays, so no
+artificial copy is added to its baseline.
 
-| Caso | NumPy | OpenPacho/OpenCL | CuPy/CUDA |
+| Case | NumPy | OpenPacho/OpenCL | CuPy/CUDA |
 | --- | ---: | ---: | ---: |
-| Suma de 16.777.216 elementos, float32 | **14.11** | 94.28 | 43.52 |
-| Secuencia sin/exp/cos de 16.777.216 elementos, float32 | 139.79 | 98.16 | **39.74** |
+| Sum of 16,777,216 elements, float32 | **14.11** | 94.28 | 43.52 |
+| sin/exp/cos sequence of 16,777,216 elements, float32 | 139.79 | 98.16 | **39.74** |
 | Matmul 2048×2048, float32 | 29.81 | 48.26 | **13.13** |
 | Matmul 2048×2048, float64 | **66.15** | 116.76 | 102.50 |
-| Jacobi 1024 variables, float32 | **4.34** | 53.51 | 19.37 |
-| Jacobi 8192 variables, float32 | 385.58 | 276.98 | **119.18** |
-| Descenso por gradiente 1024 variables, float32 | **4.32** | 68.95 | 35.92 |
-| Descenso por gradiente 8192 variables, float32 | 554.52 | 335.75 | **155.56** |
-| Jacobi 8192 variables, float64 | 1440.83 | 751.98 | **299.05** |
-| Descenso por gradiente 8192 variables, float64 | 2382.81 | 1130.29 | **438.74** |
+| Jacobi, 1024 variables, float32 | **4.34** | 53.51 | 19.37 |
+| Jacobi, 8192 variables, float32 | 385.58 | 276.98 | **119.18** |
+| Gradient descent, 1024 variables, float32 | **4.32** | 68.95 | 35.92 |
+| Gradient descent, 8192 variables, float32 | 554.52 | 335.75 | **155.56** |
+| Jacobi, 8192 variables, float64 | 1440.83 | 751.98 | **299.05** |
+| Gradient descent, 8192 variables, float64 | 2382.81 | 1130.29 | **438.74** |
 
-Los métodos usaron idénticas recurrencias y tolerancias, y los solvers residentes
-registraron el mismo número de iteraciones que el NumPy de referencia. Los datos
-son una matriz SPD de diagonal 2.5 y sub/superdiagonal -1, **almacenada y procesada
-como densa**. No se está comparando contra un solver tridiagonal o disperso
-especializado; estos resultados no describen todos los sistemas o condicionamientos.
+The methods used identical recurrences and tolerances, and resident solvers
+recorded the same iteration count as reference NumPy. The data
+is an SPD matrix with diagonal 2.5 and sub/superdiagonal -1, **stored and processed
+as dense**. The comparison is not against a specialized tridiagonal or sparse
+solver; these results do not describe all systems or condition numbers.
 
-## Qué explica las diferencias
+## What explains the differences
 
-1. **Transferencias y preparación.** En una suma grande hay poco cálculo por byte.
-   La GPU puede calcular rápido y perder la comparación completa al sumar copias,
-   asignaciones y preparación de arrays.
-2. **Despacho y control por iteración.** Jacobi de 1024 variables en float32 tarda
-   48.41 ms en OpenPacho y 19.02 ms en CuPy incluso con datos residentes, frente a
-   4.34 ms de NumPy. La subida de la matriz no explica esa pérdida. Siguen existiendo
-   kernels pequeños, temporales y sincronizaciones para extraer escalares.
-3. **Amortización.** Al crecer los sistemas de prueba, el trabajo sobre los mismos
-   datos compensa esos costes. A 8192 variables la ventaja persiste al incluir las
-   transferencias. Esto refuta “nunca puede ganar”, sin prometer ganancias generales.
-4. **Implementación.** CuPy usa bibliotecas y kernels optimizados y un pool de
-   memoria. OpenPacho usa kernels sencillos y buffers nuevos. La diferencia entre
-   ellos no demuestra una superioridad intrínseca de CUDA sobre OpenCL.
+1. **Transfers and preparation.** A large sum has little computation per byte.
+   The GPU can compute quickly and lose the complete comparison once copies,
+   allocations and array preparation are included.
+2. **Dispatch and control per iteration.** Jacobi with 1024 variables in float32 takes
+   48.41 ms on OpenPacho and 19.02 ms on CuPy even with resident data, versus
+   4.34 ms on NumPy. Matrix upload does not explain that loss. Small kernels,
+   temporaries and synchronizations to extract scalars remain.
+3. **Amortization.** As the test systems grow, work on the same
+   data offsets those costs. At 8192 variables the advantage persists with
+   transfers included. This refutes “it can never win” without promising general gains.
+4. **Implementation.** CuPy uses optimized libraries and kernels and a memory
+   pool. OpenPacho uses simple kernels and new buffers. The difference between
+   them does not demonstrate an intrinsic superiority of CUDA over OpenCL.
 
-En la cuadrícula completa, OpenPacho mostró una ventaja end-to-end clara en
-**15/140** configuraciones; CuPy en **33/140**. “Clara” exige al menos 10% de ventaja
-mediana e intervalo bootstrap descriptivo de 95% sin cruzar 1. Los recuentos dependen
-de los casos elegidos, no son probabilidades de ganar en aplicaciones reales.
+Across the full grid, OpenPacho showed a clear end-to-end advantage in
+**15/140** configurations; CuPy in **33/140**. “Clear” requires at least a 10% median
+advantage and a descriptive 95% bootstrap interval that does not cross 1. Counts depend
+on the chosen cases; they are not probabilities of winning in real applications.
 
-## Arranque
+## Startup
 
-En procesos nuevos, para una única multiplicación 1024×1024 float32, la suma de
-imports/inicialización y primera operación costó aproximadamente **0.233 s en
-NumPy**, **1.694 s en OpenPacho** y **1.216 s en CuPy**. Aquí NumPy ganó claramente.
-Son tres procesos por motor y dtype, con las cachés de disco existentes conservadas
-en CuPy y caché de disco OpenCL deshabilitada por restricciones del entorno.
+In new processes, for a single 1024×1024 float32 multiplication, the sum of
+imports/initialization and the first operation cost approximately **0.233 s on
+NumPy**, **1.694 s on OpenPacho** and **1.216 s on CuPy**. NumPy clearly won here.
+There were three processes per engine and dtype, retaining existing CuPy disk caches
+and disabling the OpenCL disk cache due to environment restrictions.
 
-## Reproducir y revisar
+## Reproduce and review
 
-El diseño y los comandos están en [benchmarks/README.md](../benchmarks/README.md).
-La salida local completa está en
-`.artifacts/benchmarks/report-2026-09-06/REPORT.md`, junto a `raw.json`,
-`comparisons.csv`, `timings.csv`, datos de arranque y gráficas PNG/SVG. Estos archivos
-locales no forman parte del código distribuido.
+The design and commands are in [benchmarks/README.md](../benchmarks/README.md).
+Complete local output is in
+`.artifacts/benchmarks/report-2026-09-06/REPORT.md`, alongside `raw.json`,
+`comparisons.csv`, `timings.csv`, startup data and PNG/SVG plots. These local
+files are not part of the distributed code.
 
-Se guardaron snapshots del runner en cada carpeta de mediciones. Sus hashes
-coinciden con los registrados: el runner se amplió con opciones para solvers
-grandes después del primer ensayo. Los **nueve archivos del runtime de OpenPacho
-permanecieron idénticos** entre ambos ensayos y durante cada ejecución.
+Runner snapshots were saved in each measurement folder. Their hashes
+match those recorded: the runner was extended with large-solver options
+after the first trial. The **nine OpenPacho runtime files
+remained identical** between both trials and throughout each run.
 
-El código del runner pasó 7 pruebas de semántica, validación y sincronización.
-Los archivos crudos conservan cada réplica y los fallos (ninguno), así como versiones,
-configuración BLAS, semilla, orden y telemetría. No se midieron otras GPUs,
-solvers dispersos especializados, kernels fusionados ni todos los condicionamientos.
+Runner code passed 7 tests of semantics, validation and synchronization.
+Raw files preserve every replicate and failure (none), along with versions,
+BLAS configuration, seed, order and telemetry. Other GPUs,
+specialized sparse solvers, fused kernels and all condition numbers were not measured.

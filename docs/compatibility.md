@@ -1,133 +1,133 @@
-# Compatibilidad con NumPy
+# NumPy compatibility
 
-El [backend CUDA](cuda.md) implementa un subconjunto menor: float32/64 y bool,
-operaciones elementwise, gather, sum/mean flotantes y min/max float32/64 o bool, normas estables float32/64
-(eager y compiladas) y matmul con vectores, matrices y broadcasting por lotes.
-Enteros y acumuladores bool para sum en CUDA siguen pendientes; las entradas bool pueden
-reducirse con acumulador float32/64 explícito. La fusión CUDA elementwise/map-reduce
-está disponible para los grupos admitidos y matmul/BLAS
-conservan su frontera. Las normas están disponibles con ambos proveedores BLAS.
-Consulta los [resultados de fusión CUDA](cuda-fusion-results.md) y el [alcance de
-normas CUDA](cuda-norm-results.md). Las tablas generales siguientes documentan
-el contrato compartido, con diferencias por backend indicadas donde corresponde.
+The [CUDA backend](cuda.md) implements a smaller subset: float32/64 and bool,
+elementwise operations, gather, floating-point sum/mean and float32/64 or bool min/max, stable float32/64 norms
+(eager and compiled) and matmul with vectors, matrices and batch broadcasting.
+Integers and bool accumulators for sum on CUDA remain pending; bool inputs can
+be reduced with an explicit float32/64 accumulator. CUDA elementwise/map-reduce
+fusion is available for supported groups and matmul/BLAS
+retain their boundary. Norms are available with both BLAS providers.
+See the [CUDA fusion results](cuda-fusion-results.md) and [CUDA norm
+scope](cuda-norm-results.md). The general tables below document
+the shared contract, with backend differences indicated where applicable.
 
-OpenPacho implementa un subconjunto explícito; no reexporta funciones de NumPy que
-puedan ejecutar accidentalmente operaciones en CPU. `__array_ufunc__` y
-`__array_function__` mantienen el backend de los arrays.
+OpenPacho implements an explicit subset; it does not re-export NumPy functions that
+could accidentally execute operations on the CPU. `__array_ufunc__` and
+`__array_function__` retain the arrays' backend.
 
-| Área | Soportado | Límites de esta versión |
+| Area | Supported | Limits of this version |
 | --- | --- | --- |
-| Creación | array, asarray, empty, zeros, ones, full, zeros_like, ones_like, arange, linspace, eye | Orden C; full escalar. arange/linspace/eye se generan en host y se suben una vez. Sin archivos. |
-| Aleatorios | random.default_rng: random, uniform, normal, exponential | [Generación residente](random.md), parámetros escalares float32/64. Vulkan normal/exponential solo float32. Sin paridad de secuencias NumPy, enteros ni captura. |
-| Datos | float32/64, int32/64, uint32/64, bool | Sin float16, enteros de 8/16 bits, complejos, objetos o dtypes estructurados. float64 exige fp64. |
-| Aritmética | +, -, *, /, potencia flotante, operadores inversos | Sin potencia entera, //, %, operadores de bits, `out=`, `ufunc where=` ni `ufunc.reduce`. |
-| Funciones | sqrt, exp, log, sin, cos, tanh, abs, isfinite, comparaciones, `where(condition, x, y)` | `where` transmite los tres argumentos y acepta condición bool o numérica; el dtype de salida se promueve desde `x` e `y` según NumPy 2, con escalares Python débiles. No admite la forma de un argumento. |
-| Broadcasting | Dimensiones arbitrarias, escalares Python y arrays 0-D | Combinar dispositivos/contextos exige una transferencia explícita. |
-| Forma | shape, ndim, size, nbytes, dtype, reshape, transpose, T | Solo orden C; reshape puede compartir almacenamiento. |
-| Índices | Enteros, slices con paso positivo/negativo, ellipsis, None/newaxis | Slices y transpose eager son copias en dispositivo, no vistas. La compilación puede omitir una transpuesta privada de matmul CLBlast según las condiciones siguientes. Sin máscaras booleanas ni indexación avanzada. |
-| Escritura | Operaciones crean resultados nuevos | Sin setitem. `a += b` y similares no se admiten mediante out=; usa `a = a + b`. |
-| Reducciones | sum, mean, min/max (amin/amax); axis=None/int/tuple y keepdims | sum promueve enteros pequeños a 64 bits. mean acumula en float32/64. min/max conservan dtype. Sin initial/where/out. |
-| Álgebra | @/matmul con vectores, matrices y broadcasting por lotes; dot 0D/1D/2D; diag de una matriz; norma euclídea/Frobenius escalada | CUDA admite normas float32/64 en eager/compile con custom y cuBLAS; sin matmul booleano, dot de rango superior a 2, diag desde vector, orden espectral, solve directo, SVD/FFT o sparse. |
-| Transferencias | asnumpy, to_host, to_backend, item | Sin conversión implícita con np.asarray. item sincroniza y copia un escalar. |
+| Creation | array, asarray, empty, zeros, ones, full, zeros_like, ones_like, arange, linspace, eye | C order; scalar full. arange/linspace/eye are generated on the host and uploaded once. No files. |
+| Random | random.default_rng: random, uniform, normal, exponential | [Resident generation](random.md), scalar float32/64 parameters. Vulkan normal/exponential only float32. No NumPy sequence parity, integers or capture. |
+| Data | float32/64, int32/64, uint32/64, bool | No float16, 8/16-bit integers, complex, object or structured dtypes. float64 requires fp64. |
+| Arithmetic | +, -, *, /, floating-point power, reflected operators | No integer power, //, %, bitwise operators, `out=`, `ufunc where=` or `ufunc.reduce`. |
+| Functions | sqrt, exp, log, sin, cos, tanh, abs, isfinite, comparisons, `where(condition, x, y)` | `where` broadcasts all three arguments and accepts a bool or numeric condition; output dtype is promoted from `x` and `y` according to NumPy 2, with weak Python scalars. The one-argument form is unsupported. |
+| Broadcasting | Arbitrary dimensions, Python scalars and 0-D arrays | Combining devices/contexts requires an explicit transfer. |
+| Shape | shape, ndim, size, nbytes, dtype, reshape, transpose, T | C order only; reshape may share storage. |
+| Indexing | Integers, slices with positive/negative steps, ellipsis, None/newaxis | Eager slices and transpose are device copies, not views. Compilation may omit a private CLBlast matmul transpose under the conditions below. No boolean masks or advanced indexing. |
+| Writing | Operations create new results | No setitem. `a += b` and similar are not supported through out=; use `a = a + b`. |
+| Reductions | sum, mean, min/max (amin/amax); axis=None/int/tuple and keepdims | sum promotes small integers to 64 bits. mean accumulates in float32/64. min/max preserve dtype. No initial/where/out. |
+| Algebra | @/matmul with vectors, matrices and batch broadcasting; dot 0D/1D/2D; diag of a matrix; scaled Euclidean/Frobenius norm | CUDA supports float32/64 norms in eager/compile with custom and cuBLAS; no boolean matmul, dot above rank 2, diag from a vector, spectral order, direct solve, SVD/FFT or sparse. |
+| Transfers | asnumpy, to_host, to_backend, item | No implicit conversion with np.asarray. item synchronizes and copies a scalar. |
 
-## Selección condicional
+## Conditional selection
 
-`where(condition, x, y)` evalúa la verdad de cada elemento de la condición y
-selecciona entre `x` e `y` con broadcasting de los tres argumentos. Los arrays
-deben pertenecer al mismo backend/dispositivo; la selección permanece en ese
-backend y no descarga datos. La ruta eager está disponible junto con captura
-`compile`/`fuse`, incluida su composición con los grupos elementwise y map-reduce
-admitidos. Ambas ramas se evalúan antes de seleccionar; `where` no es una operación
-de control de flujo perezosa. No se admite `where(condition)` (la forma que devuelve
-índices), ni el argumento keyword `where=` de ufuncs o reducciones. Consulta los
-[resultados de selección](selection-results.md).
+`where(condition, x, y)` evaluates the truth of each condition element and
+selects between `x` and `y` with broadcasting of all three arguments. Arrays
+must belong to the same backend/device; selection remains on that
+backend and does not download data. The eager path is available alongside
+`compile`/`fuse` capture, including composition with supported elementwise and
+map-reduce groups. Both branches are evaluated before selection; `where` is not
+a lazy flow-control operation. `where(condition)` (the form returning
+indices) and the `where=` keyword argument of ufuncs or reductions are unsupported. See the
+[selection results](selection-results.md).
 
-## Extremos por ejes
+## Extrema along axes
 
-`min`/`max`, sus alias `amin`/`amax` y los métodos `a.min()`/`a.max()` conservan
-el dtype de entrada y permanecen residentes. Propagan NaN; los infinitos
-participan en las comparaciones. Los enteros de 64 bits se comparan sin pasar
-por flotantes. CUDA admite float32/64 y bool; sus enteros siguen fuera de alcance.
+`min`/`max`, their `amin`/`amax` aliases and the `a.min()`/`a.max()` methods preserve
+the input dtype and remain resident. They propagate NaN; infinities
+participate in comparisons. 64-bit integers are compared without passing
+through floating point. CUDA supports float32/64 and bool; integers remain out of scope.
 
-El signo del cero tiene una regla explícita y común a los backends: en un empate
-entre `-0` y `+0`, min devuelve `-0` y max devuelve `+0`. Si solo aparece un signo,
-lo conserva. NumPy puede escoger el signo según el orden/implementación de su
-reducción; no se promete igualdad de bits con NumPy en ese empate.
+The sign of zero has an explicit rule shared across backends: in a tie
+between `-0` and `+0`, min returns `-0` and max returns `+0`. If only one sign appears,
+it is preserved. NumPy may choose the sign according to its reduction order/implementation;
+bitwise equality with NumPy in that tie is not promised.
 
-Un eje reducido de longitud cero produce `ValueError`, incluso si la salida
-también sería vacía. Una salida vacía con ejes reducidos no vacíos es válida.
-`axis=()` conserva forma y valores. No se admite dtype de acumulación, `initial`,
-`where` ni `out`. `compile` captura extremos y fusiona productores elegibles con
-su reducción; `fuse` sigue limitado a elementwise. Ver [alcance y pruebas](extrema-results.md).
+A reduced axis of length zero produces `ValueError`, even if the output
+would also be empty. An empty output with nonempty reduced axes is valid.
+`axis=()` preserves shape and values. Accumulation dtype, `initial`,
+`where` and `out` are unsupported. `compile` captures extrema and fuses eligible producers with
+their reduction; `fuse` remains limited to elementwise. See [scope and tests](extrema-results.md).
 
-Los resultados escalares son arrays 0-D en el mismo dispositivo. Para control de
-flujo Python, llama `.item()`. `if array:` siempre falla para evitar sincronizaciones
-ocultas. El repr muestra metadatos y no descarga los valores.
+Scalar results are 0-D arrays on the same device. For Python flow
+control, call `.item()`. `if array:` always fails to avoid hidden
+synchronizations. The repr shows metadata and does not download values.
 
-Los inputs NumPy no contiguos se copian a orden C al subirlos. `asarray` puede
-reutilizar un array Pacho en el mismo backend/dtype, pero los datos de host siempre
-se copian a almacenamiento propio. `copy=False` al construir desde host no promete
-compartir memoria con el objeto original.
+Noncontiguous NumPy inputs are copied to C order on upload. `asarray` may
+reuse a Pacho array on the same backend/dtype, but host data is always
+copied into owned storage. `copy=False` when constructing from the host does not promise
+shared memory with the original object.
 
-Los resultados de punto flotante no tienen por qué coincidir bit a bit con NumPy:
-el orden de las sumas y las funciones matemáticas del dispositivo puede variar.
-La contracción producto-suma también depende de la ruta. CUDA custom desactiva
-FMA en NVRTC; el GEMM custom OpenCL permite al compilador contraer, mientras sus
-lowerers elementwise/map-reduce la desactivan. La [comprobación float64 local](fp64-contraction-results.md)
-identifica las instrucciones generadas y los efectos numéricos de ambas políticas.
-No existe todavía un selector público uniforme de contracción entre proveedores.
-La conversión de flotantes a enteros fuera del rango representable no tiene
-paridad garantizada entre NumPy y OpenCL; debe evitarse también en expresiones
-fusionadas.
-La norma usa suma de cuadrados escalada; evita formar directamente el cuadrado
-de entradas muy pequeñas o grandes.
-No se amplía el dtype: un resultado fuera de su rango sigue sin ser representable,
-y los modos de aritmética subnormal del dispositivo siguen siendo relevantes.
-Los solvers de [examples](../examples/README.md), fuera del paquete, mantienen
-el chequeo de residuo en cada iteración. Un residuo pequeño
-no certifica una solución precisa en sistemas mal condicionados; ver
-[medición del error](numerical-accuracy.md).
+Floating-point results need not match NumPy bit for bit:
+sum order and device math functions may vary.
+Multiply-add contraction also depends on the path. CUDA custom disables
+FMA in NVRTC; OpenCL custom GEMM allows compiler contraction, whereas its
+elementwise/map-reduce lowerers disable it. The [local float64 check](fp64-contraction-results.md)
+identifies the generated instructions and numerical effects of both policies.
+There is not yet a uniform public contraction selector across providers.
+Converting floating-point values to integers outside the representable range has no
+guaranteed parity between NumPy and OpenCL; it should also be avoided in fused
+expressions.
+The norm uses a scaled sum of squares; it avoids directly forming the square
+of very small or large inputs.
+The dtype is not widened: a result outside its range remains unrepresentable,
+and the device's subnormal arithmetic modes remain relevant.
+The solvers in [examples](../examples/README.md), outside the package, retain
+the residual check at every iteration. A small residual
+does not certify an accurate solution in ill-conditioned systems; see
+[error measurement](numerical-accuracy.md).
 
-## Ruta de migración
+## Migration path
 
-1. Ejecuta las pruebas del código original con NumPy y conserva resultados de referencia.
-2. Convierte inputs con `pacho.asarray(..., dtype=...)` y selecciona OpenCL explícitamente.
-3. Mantén llamadas NumPy compatibles, o cambia el import a `openpacho` para creadores y operaciones soportados.
-4. Transfiere con `asnumpy` solo al entregar resultados a librerías que requieran CPU.
-5. Compara precisión y tiempos después de una primera ejecución para compilar kernels.
-6. Para cálculos repetidos, evalúa `@pacho.compile` según los
-   [límites de captura y compilación](compilation.md). El backend sigue siendo explícito.
+1. Run the original code's tests with NumPy and retain reference results.
+2. Convert inputs with `pacho.asarray(..., dtype=...)` and select OpenCL explicitly.
+3. Keep compatible NumPy calls, or change the import to `openpacho` for supported creators and operations.
+4. Transfer with `asnumpy` only when handing results to libraries requiring the CPU.
+5. Compare accuracy and times after a first execution to compile kernels.
+6. For repeated computations, evaluate `@pacho.compile` according to the
+   [capture and compilation limits](compilation.md). The backend remains explicit.
 
-Una función de una dependencia que llama internamente `np.asarray` puede requerir
-adaptación; soportar los protocolos de NumPy no implica compatibilidad universal
-con SciPy, pandas, scikit-learn u otros paquetes.
+A dependency function that internally calls `np.asarray` may require
+adaptation; supporting NumPy protocols does not imply universal compatibility
+with SciPy, pandas, scikit-learn or other packages.
 
 
-## Compilación y capacidades por backend
+## Compilation and capabilities by backend
 
-La compatibilidad es deliberadamente parcial: se prioriza cálculo matricial
-frecuente frente a replicar todo NumPy. [`compile`](compilation.md) añade
-restricciones locales de pureza/captura y usa la misma semántica de operaciones.
-La ejecución directa sigue disponible.
+Compatibility is deliberately partial: common matrix computation takes priority
+over replicating all of NumPy. [`compile`](compilation.md) adds
+local purity/capture restrictions and uses the same operation semantics.
+Direct execution remains available.
 
-`compile(..., padding=True)` conserva el cuerpo NumPy intercambiable (`a @ b`)
-y activa [padding interno](padding.md) solo para GEMM custom float32 elegible.
-También existe `pacho.matmul(..., padding=True)` para ejecución directa; ese
-keyword es propio de OpenPacho. El valor predeterminado es `False`. Las formas
-lógicas y el proveedor elegido se conservan, incluidos los casos sin soporte.
+`compile(..., padding=True)` preserves the interchangeable NumPy body (`a @ b`)
+and enables [internal padding](padding.md) only for eligible custom float32 GEMM.
+`pacho.matmul(..., padding=True)` also exists for direct execution; that
+keyword is specific to OpenPacho. The default is `False`. Logical shapes
+and the selected provider are preserved, including unsupported cases.
 
-Con OpenCL y CLBlast, `compile` puede sustituir una transpuesta completa 2D
-privada por flags del GEMM float32/64, conservando el almacenamiento original
-como entrada. Solo aplica si esa transpuesta tiene un único consumidor matmul y
-no es una salida pública. Los temporales compartidos, salidas independientes,
-dimensiones vacías y backends sin esa capacidad mantienen la copia; la ejecución
-eager tampoco cambia. El padding explícito elegible tiene precedencia. El plan
-no retiene las entradas de ejemplo ni introduce vistas públicas. Esta optimización
-no garantiza ventaja en todas las formas ni igualdad bit a bit con el producto
-de transpuestas materializadas; véase [compilación](compilation.md).
+With OpenCL and CLBlast, `compile` may replace a private full 2D transpose
+with float32/64 GEMM flags, retaining the original storage
+as input. This applies only if that transpose has a single matmul consumer and
+is not a public output. Shared temporaries, independent outputs,
+empty dimensions and backends without that capability retain the copy; eager
+execution is also unchanged. Eligible explicit padding takes precedence. The plan
+does not retain example inputs or introduce public views. This optimization
+does not guarantee an advantage on every shape or bitwise equality with the product
+of materialized transposes; see [compilation](compilation.md).
 
-OpenCL y Vulkan se seleccionan explícitamente. Vulkan no admite trascendentes
-float64 ni potencia float64; int64/uint64 requieren shaderInt64. Sus límites y
-estado de optimización se detallan en [Vulkan](vulkan.md). El [backend CUDA](cuda.md)
-es inicial: cuBLAS puede ser su proveedor; CuPy sigue siendo un comparador externo.
-Los extras de instalación son independientes: OpenCL/Vulkan no requieren CUDA.
+OpenCL and Vulkan are selected explicitly. Vulkan does not support float64
+transcendentals or float64 power; int64/uint64 require shaderInt64. Its limits and
+optimization status are detailed in [Vulkan](vulkan.md). The [CUDA backend](cuda.md)
+is initial: cuBLAS may be its provider; CuPy remains an external comparator.
+Installation extras are independent: OpenCL/Vulkan do not require CUDA.

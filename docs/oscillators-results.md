@@ -1,15 +1,15 @@
-# Osciladores acoplados: flujo iterativo sin observaciones por paso
+# Coupled oscillators: iterative flow without per-step observations
 
-Esta aplicación evalúa un caso distinto de los solvers hasta convergencia:
-trabajo fijo, reutilización de la misma matriz y acumulación de error durante una
-trayectoria. Se implementa en `examples/oscillators.py`, fuera del wheel, mediante
-operaciones públicas. No añade física, autodiff ni un bucle GPU al runtime.
+This application evaluates a case distinct from solvers run to convergence:
+fixed work, reuse of the same matrix, and error accumulation along a
+trajectory. It is implemented in `examples/oscillators.py`, outside the wheel, through
+public operations. It adds neither physics, autodiff, nor a GPU loop to the runtime.
 
-## Modelo y algoritmo
+## Model and algorithm
 
-Para masas unitarias se resuelve `q'' = -K @ q`, con K simétrica definida positiva.
-El estado incluye posición q, velocidad v y aceleración a. Un paso velocity-Verlet
-calcula:
+For unit masses, it solves `q'' = -K @ q`, with symmetric positive-definite K.
+State includes position q, velocity v, and acceleration a. One velocity-Verlet step
+computes:
 
 ```
 vhalf = v + (dt/2)*a
@@ -18,122 +18,122 @@ a1 = -(K @ q1)
 v1 = vhalf + (dt/2)*a1
 ```
 
-`integrate` calcula `a0 = -(K @ q0)` una vez y lleva la aceleración de un paso al
-siguiente. Un recorrido de N pasos usa N+1 GEMV. Cada repetición parte del mismo
-estado original. Las funciones no modifican entradas ni consultan valores host.
-`energy` calcula `(v·v + q·Kq)/2` como diagnóstico separado.
+`integrate` computes `a0 = -(K @ q0)` once and carries acceleration from one step
+to the next. An N-step trajectory uses N+1 GEMVs. Every repetition starts from the
+same original state. Functions neither modify inputs nor query host values.
+`energy` computes `(v·v + q·Kq)/2` as a separate diagnostic.
 
-La compilación prepara únicamente `verlet_step`; el bucle exterior sigue en
-Python y reutiliza el plan. Desenrollar todo el recorrido sería otra estrategia
-y no se usa en esta comparación. Se sincroniza al medir el recorrido completo,
-sin introducir descargas o reducciones de energía entre sus pasos.
+Compilation prepares only `verlet_step`; the outer loop remains in
+Python and reuses the plan. Unrolling the entire trajectory would be another strategy
+and is not used in this comparison. Synchronization occurs when measuring the complete trajectory,
+without introducing downloads or energy reductions between steps.
 
-La estabilidad exige `abs(dt)*sqrt(lambda_max(K)) < 2`. El ejemplo valida
-metadatos y deja al caller las propiedades de K, finitud y estabilidad. Los
-tamaños densos de este experimento no representan necesariamente la forma
-apropiada de almacenar un sistema físico local o disperso.
+Stability requires `abs(dt)*sqrt(lambda_max(K)) < 2`. The example validates
+metadata and leaves K's properties, finiteness, and stability to the caller. The
+dense sizes in this experiment do not necessarily represent the appropriate way
+to store a local or sparse physical system.
 
-## Referencias y comprobaciones
+## References and checks
 
-La comparación de backends debe usar exactamente los inputs ya redondeados al
-dtype solicitado. La recurrencia NumPy float64 separa diferencias de ejecución
-del error temporal: es mayor precisión para inputs float32 e igual precisión
-para float64, no un oráculo exacto.
+Backend comparisons must use exactly the inputs already rounded to the
+requested dtype. The NumPy float64 recurrence separates execution differences
+from time-discretization error: it has higher precision for float32 inputs and equal precision
+for float64, rather than being an exact oracle.
 
-Para un sistema pequeño, si `K = Q diag(omega²) Q.T`, `c = Q.T @ q0` y
-`d = Q.T @ v0`, la solución continua es:
+For a small system, if `K = Q diag(omega²) Q.T`, `c = Q.T @ q0`, and
+`d = Q.T @ v0`, the continuous solution is:
 
 ```
 q(t) = Q @ (c*cos(omega*t) + d*sin(omega*t)/omega)
 v(t) = Q @ (-omega*c*sin(omega*t) + d*cos(omega*t))
 ```
 
-Se compara la recurrencia discreta con esta trayectoria por separado del error
-entre backends. La energía inicial se evalúa en t=0 y la velocidad siempre en
-instantes enteros. La energía de Verlet puede oscilar; no se exige disminución
-monótona ni deriva final cero. La excursión máxima se obtiene de una repetición
-diagnóstica fuera de los tiempos.
+The discrete recurrence is compared with this trajectory separately from the error
+between backends. Initial energy is evaluated at t=0 and velocity always at
+integer time points. Verlet energy may oscillate; neither monotonic decrease
+nor zero final drift is required. Maximum excursion is obtained from a diagnostic
+repetition outside the timings.
 
-Las pruebas CPU verifican un paso escalar, convergencia de segundo orden a tiempo
-final fijo, excursión energética acotada, reversibilidad, conteo de productos,
-inputs inmutables y rebinding del plan. Ocho pruebas nativas verifican eager,
-compiled y prepared en OpenCL, Vulkan y CUDA custom/cuBLAS, float32 y float64.
-Todas pasan; Vulkan float64 admite este flujo, que no necesita trascendentes.
+CPU tests check a scalar step, second-order convergence at fixed final time,
+bounded energy excursion, reversibility, product counts,
+immutable inputs, and plan rebinding. Eight native tests check eager,
+compiled, and prepared execution in OpenCL, Vulkan, and CUDA custom/cuBLAS, float32 and float64.
+All pass; Vulkan float64 supports this flow, which needs no transcendental functions.
 
-## Protocolo de medición
+## Measurement protocol
 
-Se usan N=31, 257 y 2049, float32/float64, dt=1/32 y 64 pasos: tiempo final 2.
-La semilla 47 genera `K = I + R.T @ R / N` en float64; se simetriza antes de
-convertir al dtype y se escala el estado inicial por `1/sqrt(N)`. Generación y
-referencias usan siempre un hilo BLAS, fuera de los tiempos de integración.
-Se conservan hashes de los inputs efectivos para comparar procesos y proveedores.
+N=31, 257, and 2049, float32/float64, dt=1/32, and 64 steps are used: final time 2.
+Seed 47 generates `K = I + R.T @ R / N` in float64; it is symmetrized before
+conversion to the dtype, and the initial state is scaled by `1/sqrt(N)`. Generation and
+references always use one BLAS thread, outside integration timings.
+Hashes of the effective inputs are retained to compare processes and providers.
 
-La matriz suministrada se verifica simétrica, se comprueba Cholesky numérico
-en float64 y se exige `dt*sqrt(norm_inf(K)) < 2`. Cholesky es una comprobación
-numérica de positividad, no un certificado matemático exacto. N≤257 añade la
-referencia modal y una repetición separada de energía con observación por paso;
-N=2049 conserva la referencia discreta y la energía final, sin diagonalizar.
+The supplied matrix is checked for symmetry, numerical Cholesky is checked
+in float64, and `dt*sqrt(norm_inf(K)) < 2` is required. Cholesky is a numerical
+positivity check, not an exact mathematical certificate. N≤257 adds the
+modal reference and a separate energy repetition with per-step observation;
+N=2049 retains the discrete reference and final energy, without diagonalization.
 
-Se comparan NumPy con uno y ocho hilos, OpenCL custom/CLBlast, Vulkan, CUDA
-custom/cuBLAS y CuPy. Los backends OpenPacho ejecutan eager y un plan preparado
-de un paso. Las dos modalidades se intercalan en 12 rondas equilibradas; cada
-backend tiene un proceso independiente y se repite en orden inverso.
+Comparators are NumPy with one and eight threads, OpenCL custom/CLBlast, Vulkan, CUDA
+custom/cuBLAS, and CuPy. OpenPacho backends run eager and a prepared
+single-step plan. Both modes interleave across 12 balanced rounds; each
+backend has an independent process and is repeated in reverse order.
 
-Preparación, subida inicial, aceleración de ejemplo, primera llamada y
-calentamiento se registran por separado. Cada muestra residente calcula de nuevo
-la aceleración inicial y realiza los 64 pasos sobre inputs residentes; la muestra
-completa incluye subir K/q/v y descargar q/v/a. Las validaciones quedan fuera del
-reloj. Se conservan las muestras, errores y fallos; no se elimina un tiempo porque
-su resultado sea incorrecto. La energía inicial/final y el error modal también
-se evalúan fuera de los tiempos.
+Preparation, initial upload, sample acceleration, first call, and
+warm-up are recorded separately. Each resident sample recomputes
+initial acceleration and performs all 64 steps on resident inputs; the
+complete sample includes uploading K/q/v and downloading q/v/a. Validation remains outside
+the timer. Samples, errors, and failures are retained; a timing is not removed because
+its result is incorrect. Initial/final energy and modal error are also
+evaluated outside the timings.
 
-Residente y completo son muestras distintas. La variación puede hacer que una
-mediana completa sea menor que su mediana residente; su resta no representa un
-coste de transferencia y no se usa para descomponer el tiempo.
+Resident and complete are distinct samples. Variation may make a
+complete median lower than its resident median; subtracting them does not represent
+transfer cost and is not used to break down time.
 
-El benchmark registra bytes de entradas/salidas y no mide el pico de memoria.
-Estos tamaños no establecen rendimiento por encima de la caché ni un límite de
-ancho de banda. Las condiciones locales siguen siendo RTX 5060 Ti, Windows y
-driver 617.14; no se extrapolan a otras GPU.
+The benchmark records input/output bytes and does not measure peak memory.
+These sizes establish neither performance beyond cache capacity nor a bandwidth
+limit. Local conditions remain RTX 5060 Ti, Windows, and
+driver 617.14; results are not extrapolated to other GPUs.
 
 ```powershell
 python -m benchmarks.oscillators --backend numpy --profile quick --repeats 12 --output .artifacts/oscillators-new.json
 python -m benchmarks.oscillators --backend cuda-custom --profile all --repeats 12 --output .artifacts/oscillators-cuda-new.json
 ```
 
-Las ejecuciones GPU requieren exclusividad y reposo observado antes de iniciar
-cada proceso. Los artefactos locales se conservan en
-`.artifacts/iterations-2026-10-22/oscillators/`, con la sesión y los informes
-individuales; `oscillators-native.xml` conserva las ocho pruebas nativas.
+GPU runs require exclusive access and observed idle state before starting
+each process. Local artifacts are retained in
+`.artifacts/iterations-2026-10-22/oscillators/`, with the session and individual
+reports; `oscillators-native.xml` retains the eight native tests.
 
-## Resultados locales
+## Local results
 
-En esta carga, NumPy con ocho hilos es más rápido que todas las rutas GPU medidas,
-tanto residente como completa, en ambos dtypes y los tres tamaños. Compilar un
-paso sí mejora consistentemente OpenPacho frente a eager, pero esa mejora no
-basta para superar la referencia CPU elegida. Para N=2049 float64, CUDA custom
-compilado tarda 17.806–18.011 ms residente frente a 58.222–63.942 ms eager;
-NumPy ocho hilos tarda 11.752–12.572 ms. El flujo completo mantiene esa conclusión.
+For this workload, NumPy with eight threads is faster than every measured GPU path,
+both resident and complete, in both dtypes and all three sizes. Compiling one
+step consistently improves OpenPacho versus eager, but that gain is
+insufficient to beat the selected CPU reference. For N=2049 float64, compiled CUDA custom
+takes 17.806–18.011 ms resident versus 58.222–63.942 ms eager;
+NumPy with eight threads takes 11.752–12.572 ms. The complete flow retains that conclusion.
 
-La pared GPU cambia poco entre N=31 y N=2049, mientras el coste NumPy crece con
-el tamaño. Esto justifica estudiar despacho/reutilización del bucle antes de
-añadir otro kernel GEMV; sin eventos GPU específicos de este recorrido no se
-atribuye cuantitativamente la diferencia a Python o al driver. Tampoco se amplían
-artificialmente las matrices para convertir esta medición en una victoria GPU.
+GPU wall time changes little between N=31 and N=2049, while NumPy cost grows
+with size. This justifies studying loop dispatch/reuse before
+adding another GEMV kernel; without GPU events specific to this trajectory, the
+difference is not quantitatively attributed to Python or the driver. Matrices are not artificially
+expanded to turn this measurement into a GPU win either.
 
-La aplicación aporta un flujo reproducible y una recomendación acotada de backend,
-no una modificación del runtime. En los sistemas con referencia modal, el error
-temporal de Verlet es mayor que las diferencias observadas entre backends: cambiar
-de float32 a float64 no elimina el error de usar este paso temporal.
+The application provides a reproducible flow and a bounded backend recommendation,
+not a runtime modification. In systems with a modal reference, Verlet's
+time-discretization error exceeds observed differences between backends: changing
+from float32 to float64 does not remove the error from using this time step.
 
-Las 14 ejecuciones completan 156 filas aceptadas y 3.744 muestras
-residentes/completas. Los hashes de inputs, runtime, ejemplo y runner coinciden
-entre los procesos. Las tablas muestran rangos de medianas de las dos rondas,
-en milisegundos por recorrido de 64 pasos; no son intervalos de confianza.
+The 14 runs complete 156 accepted rows and 3,744
+resident/complete samples. Input, runtime, example, and runner hashes match
+across processes. Tables show median ranges from both rounds,
+in milliseconds per 64-step trajectory; they are not confidence intervals.
 
 ### float32
 
-| Implementación | N31 residente | N31 completo | N257 residente | N257 completo | N2049 residente | N2049 completo |
+| Implementation | N31 resident | N31 complete | N257 resident | N257 complete | N2049 resident | N2049 complete |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | numpy-1t | 0.717–0.731 | 0.713–0.773 | 1.061–1.062 | 1.062–1.064 | 14.667–14.729 | 14.400–15.191 |
 | numpy-8t | 0.713–0.723 | 0.706–0.720 | 1.058–1.058 | 1.058–1.116 | 8.570–9.253 | 8.158–9.168 |
@@ -151,7 +151,7 @@ en milisegundos por recorrido de 64 pasos; no son intervalos de confianza.
 
 ### float64
 
-| Implementación | N31 residente | N31 completo | N257 residente | N257 completo | N2049 residente | N2049 completo |
+| Implementation | N31 resident | N31 complete | N257 resident | N257 complete | N2049 resident | N2049 complete |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | numpy-1t | 0.681–0.695 | 0.674–0.688 | 1.328–1.332 | 1.326–1.355 | 27.644–29.461 | 27.412–29.292 |
 | numpy-8t | 0.670–0.679 | 0.680–0.682 | 1.288–1.410 | 1.287–1.333 | 11.752–12.572 | 10.995–11.933 |
@@ -167,41 +167,41 @@ en milisegundos por recorrido de 64 pasos; no son intervalos de confianza.
 | cuda-cublas-compiled | 18.889–18.968 | 18.912–19.528 | 18.617–18.890 | 18.906–19.355 | 19.498–20.004 | 24.661–25.143 |
 | cupy-eager | 16.182–16.562 | 16.014–16.942 | 15.670–15.939 | 15.782–16.461 | 15.803–17.774 | 18.313–21.487 |
 
-### Diferencias numéricas
+### Numerical differences
 
-Se exigió `rtol=2e-4, atol=2e-6` para float32 y `rtol=2e-10, atol=2e-12`
-para float64 frente a la recurrencia NumPy float64 de los mismos inputs.
-Los máximos absolutos observados en los diagnósticos guardados son:
+`rtol=2e-4, atol=2e-6` for float32 and `rtol=2e-10, atol=2e-12`
+for float64 were required against the NumPy float64 recurrence on the same inputs.
+Maximum absolute errors observed in saved diagnostics are:
 
-| Dtype | Posición q | Velocidad v | Aceleración a |
+| Dtype | Position q | Velocity v | Acceleration a |
 | --- | ---: | ---: | ---: |
 | float32 | 1.539e-07 | 1.370e-07 | 2.709e-07 |
 | float64 | 1.665e-16 | 2.515e-16 | 4.718e-16 |
 
-La referencia modal mide otro error: el de discretizar el tiempo con Verlet.
-La excursión energética es el máximo valor absoluto de `(E(t)-E(0))/E(0)`
-en 65 instantes, a través de los proveedores y de ambas rondas.
+The modal reference measures another error: time discretization with Verlet.
+Energy excursion is the maximum absolute value of `(E(t)-E(0))/E(0)`
+at 65 time points, across providers and both rounds.
 
-| N / dtype | Error temporal máximo q | Error temporal máximo v | Excursión energética observada |
+| N / dtype | Maximum time-discretization error q | Maximum time-discretization error v | Observed energy excursion |
 | --- | ---: | ---: | ---: |
 | 31 / float32 | 8.607e-05 | 1.372e-04 | 3.938e-04–3.939e-04 |
 | 31 / float64 | 8.607e-05 | 1.372e-04 | 3.939e-04–3.939e-04 |
 | 257 / float32 | 6.862e-05 | 8.378e-05 | 3.693e-04–3.693e-04 |
 | 257 / float64 | 6.862e-05 | 8.378e-05 | 3.693e-04–3.693e-04 |
 
-N=2049 no tiene referencia modal ni excursión por paso en esta medición;
-sí conserva la referencia discreta y el cambio de energía final.
+N=2049 has neither a modal reference nor per-step excursion in this measurement;
+it does retain the discrete reference and final energy change.
 
-Se registran 5.916 llamadas de validación y 12.480
-diagnósticos individuales guardados. El calentamiento valida todas sus
-llamadas y conserva únicamente el último conjunto de métricas para acotar
-el informe; cualquier fallo se retiene. Ninguna fila falló numéricamente.
+5,916 validation calls and 12,480 individual saved diagnostics
+are recorded. Warm-up validates all its
+calls and retains only the final set of metrics to bound
+the report; any failure is retained. No row failed numerically.
 
-La verificación dirigida comprende 21 pruebas CPU del ejemplo, ocho nativas y
-11 del protocolo de benchmark: 40 aprobadas. No se ejecutó la suite global.
+Targeted verification comprises 21 CPU example tests, eight native tests, and
+11 benchmark-protocol tests: 40 passed. The global suite was not run.
 
-QA independiente: **APPROVE**. Se reejecutaron las 32 pruebas CPU y se comprobaron
-las 156 celdas de tiempos, tablas numéricas, hashes, referencias físicas y 12
-puertas de reposo. Los seis inputs se recrearon bajo BLAS de un hilo. Los 33
-archivos del runtime son idénticos al estado anterior; la revisión nativa se basa
-en el XML guardado de ocho casos, sin nuevas ejecuciones GPU durante QA.
+Independent QA: **APPROVE**. The 32 CPU tests were rerun, and the
+156 timing cells, numerical tables, hashes, physical references, and 12
+idle gates were checked. All six inputs were recreated under single-threaded BLAS. The 33
+runtime files are identical to the previous state; native review is based
+on the saved XML of eight cases, without new GPU runs during QA.
