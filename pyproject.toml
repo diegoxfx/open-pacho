@@ -1,23 +1,42 @@
-requires = ["hatchling"]
+[build-system]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
 name = "open-pacho"
-version = "0.1.0"
-description = "A NumPy-like library for GPU acceleration using OpenCL"
+version = "0.1.0a1"
+description = "Portable GPU array operations with a NumPy-style API and optional OpenCL, Vulkan and CUDA backends"
 readme = "README.md"
-keywords = ["opencl", "gpu", "numpy-like", "python"]
-license = {file = "LICENSE"}
-authors = [{ name = "Diego Cifuentes", email = "dcifuen3@gmail.com"}]
 requires-python = ">=3.10"
-
-dependencies = [
-  "numpy>=2.2.1",
-  "pyopencl>=2024.3",
+license = "MIT"
+authors = [{name = "Diego Cifuentes"}]
+dependencies = ["numpy>=2.0,<3"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Programming Language :: Python :: 3",
+  "Topic :: Scientific/Engineering :: Mathematics",
 ]
 
 [project.optional-dependencies]
-dev = [
-  "pytest>=8.3.4",
-  "pyopencl[pocl]"
-]
+opencl = ["pyopencl>=2024.3"]
+vulkan = ["vulkan>=1.3.275.1"]
+cuda = ["cuda-bindings>=13.3,<14", "nvidia-cuda-nvrtc>=13.3,<14", "nvmath-python>=1,<2", "nvidia-cublas>=13,<14"]
+dev = ["pytest>=8", "build>=1.2", "ruff>=0.11"]
+benchmark = ["matplotlib>=3.8", "threadpoolctl>=3.5"]
+
+[project.scripts]
+pacho = "openpacho.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/openpacho"]
+
+[tool.hatch.build.targets.sdist]
+include = ["/src", "/tests", "/examples", "/docs", "/benchmarks", "/README.md", "/LICENSE", "/pyproject.toml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["opencl: requires a working OpenCL device", "vulkan: requires a Vulkan device and shader compiler", "cuda: requires a CUDA device, NVRTC and optional cuBLAS"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
